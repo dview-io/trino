@@ -18,9 +18,10 @@ import io.airlift.configuration.ConfigHidden;
 import io.airlift.units.Duration;
 import io.airlift.units.MaxDuration;
 import io.airlift.units.MinDuration;
-
-import javax.validation.constraints.Max;
-import javax.validation.constraints.Min;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 public class BigQueryRpcConfig
 {
@@ -34,6 +35,7 @@ public class BigQueryRpcConfig
     private int retries;
     private Duration timeout = Duration.valueOf("0s");
     private Duration retryDelay = Duration.valueOf("0s");
+    private double retryMultiplier = 1.0;
 
     @Min(1)
     @Max(MAX_RPC_CONNECTIONS)
@@ -151,5 +153,20 @@ public class BigQueryRpcConfig
     {
         this.retryDelay = retryDelay;
         return this;
+    }
+
+    @ConfigHidden
+    @Config("bigquery.rpc-retry-delay-multiplier")
+    public BigQueryRpcConfig setRetryMultiplier(double retryMultiplier)
+    {
+        this.retryMultiplier = retryMultiplier;
+        return this;
+    }
+
+    @DecimalMin("1.0")
+    @DecimalMax("2.0")
+    public double getRetryMultiplier()
+    {
+        return retryMultiplier;
     }
 }

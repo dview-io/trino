@@ -16,6 +16,7 @@ package io.trino.filesystem;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * TrinoFileSystem is the main abstraction for Trino to interact with data in cloud-like storage
@@ -80,7 +81,7 @@ public interface TrinoFileSystem
      * a slash or whitespace. If the file is a director, an exception is raised.
      *
      * @throws IllegalArgumentException if location is not valid for this file system
-     * @throws IOException if the file does not exist or was not deleted.
+     * @throws IOException if the file does not exist (optional) or was not deleted
      */
     void deleteFile(Location location)
             throws IOException;
@@ -91,7 +92,7 @@ public interface TrinoFileSystem
      * looping over the locations as some file systems support batch delete operations natively.
      *
      * @throws IllegalArgumentException if location is not valid for this file system
-     * @throws IOException if a file does not exist or was not deleted.
+     * @throws IOException if a file does not exist (optional) or was not deleted
      */
     default void deleteFiles(Collection<Location> locations)
             throws IOException
@@ -153,12 +154,57 @@ public interface TrinoFileSystem
             throws IOException;
 
     /**
-     * Checks if a directory exists at the specified location. For non-hierarchical file systems
-     * an empty Optional is returned.
+     * Checks if a directory exists at the specified location. For all file system types,
+     * this returns <tt>true</tt> if the location is empty (the root of the file system)
+     * or if any files exist within the directory, as determined by {@link #listFiles(Location)}.
+     * Otherwise:
+     * <ul>
+     * <li>For hierarchical file systems, this returns <tt>true</tt> if the
+     *     location is an empty directory, else it returns <tt>false</tt>.
+     * <li>For non-hierarchical file systems, an <tt>Optional.empty()</tt> is returned,
+     *     indicating that the file system has no concept of an empty directory.
+     * </ul>
      *
      * @param location the location to check for a directory
-     * @throws IOException if the location is not valid for this file system
+     * @throws IllegalArgumentException if the location is not valid for this file system
      */
     Optional<Boolean> directoryExists(Location location)
+            throws IOException;
+
+    /**
+     * Creates the specified directory and any parent directories that do not exist.
+     * For hierarchical file systems, if the location already exists but is not a
+     * directory, or if the directory cannot be created, an exception is raised.
+     * This method does nothing for non-hierarchical file systems or if the directory
+     * already exists.
+     *
+     * @throws IllegalArgumentException if location is not valid for this file system
+     */
+    void createDirectory(Location location)
+            throws IOException;
+
+    /**
+     * Renames source to target. An exception is raised if the target already exists,
+     * or on non-hierarchical file systems.
+     *
+     * @throws IllegalArgumentException if location is not valid for this file system
+     */
+    void renameDirectory(Location source, Location target)
+            throws IOException;
+
+    /**
+     * Lists all directories that are direct descendants of the specified directory.
+     * The location can be empty, which lists all directories at the root of the file system,
+     * otherwise the location otherwise the location must end with a slash.
+     * If the location does not exist, an empty set is returned.
+     * <p>
+     * For hierarchical file systems, if the path is not a directory, an exception is raised.
+     * For hierarchical file systems, if the path does not reference an existing directory,
+     * an empty iterator is returned. For blob file systems, all directories containing
+     * blobs that start with the location are listed.
+     *
+     * @throws IllegalArgumentException if location is not valid for this file system
+     */
+    Set<Location> listDirectories(Location location)
             throws IOException;
 }

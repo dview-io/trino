@@ -14,6 +14,8 @@
 package io.trino.plugin.deltalake;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.airlift.units.DataSize;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystemFactory;
@@ -21,6 +23,7 @@ import io.trino.plugin.base.classloader.ClassLoaderSafeConnectorSplitSource;
 import io.trino.plugin.deltalake.functions.tablechanges.TableChangesSplitSource;
 import io.trino.plugin.deltalake.functions.tablechanges.TableChangesTableFunctionHandle;
 import io.trino.plugin.deltalake.transactionlog.AddFileEntry;
+import io.trino.plugin.deltalake.transactionlog.MetadataEntry;
 import io.trino.plugin.deltalake.transactionlog.TableSnapshot;
 import io.trino.plugin.deltalake.transactionlog.TransactionLogAccess;
 import io.trino.plugin.deltalake.transactionlog.statistics.DeltaLakeFileStatistics;
@@ -34,13 +37,11 @@ import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.connector.FixedSplitSource;
+import io.trino.spi.function.table.ConnectorTableFunctionHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.NullableValue;
 import io.trino.spi.predicate.TupleDomain;
-import io.trino.spi.ptf.ConnectorTableFunctionHandle;
 import io.trino.spi.type.TypeManager;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.net.URI;
@@ -58,6 +59,7 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.Slices.utf8Slice;
+import static io.trino.plugin.deltalake.DeltaLakeAnalyzeProperties.AnalyzeMode.FULL_REFRESH;
 import static io.trino.plugin.deltalake.DeltaLakeColumnHandle.pathColumnHandle;
 import static io.trino.plugin.deltalake.DeltaLakeMetadata.createStatisticsPredicate;
 import static io.trino.plugin.deltalake.DeltaLakeSessionProperties.getDynamicFilteringWaitTimeout;
@@ -67,9 +69,10 @@ import static io.trino.plugin.deltalake.transactionlog.DeltaLakeSchemaSupport.ex
 import static io.trino.plugin.deltalake.transactionlog.TransactionLogParser.deserializePartitionValue;
 import static io.trino.spi.connector.FixedSplitSource.emptySplitSource;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
+import static java.util.stream.Collectors.counting;
+import static java.util.stream.Collectors.groupingBy;
 
 public class DeltaLakeSplitManager
         implements ConnectorSplitManager
@@ -148,7 +151,7 @@ public class DeltaLakeSplitManager
     {
         TableSnapshot tableSnapshot;
         try {
-            tableSnapshot = transactionLogAccess.loadSnapshot(tableHandle.getSchemaTableName(), tableHandle.getLocation(), session);
+            tableSnapshot = transactionLogAccess.getSnapshot(session, tableHandle.getSchemaTableName(), tableHandle.getLocation(), Optional.of(tableHandle.getReadVersion()));
         }
         catch (IOException e) {
             throw new RuntimeException(e);
@@ -168,21 +171,25 @@ public class DeltaLakeSplitManager
         Optional<Instant> filesModifiedAfter = tableHandle.getAnalyzeHandle().flatMap(AnalyzeHandle::getFilesModifiedAfter);
         Optional<Long> maxScannedFileSizeInBytes = maxScannedFileSize.map(DataSize::toBytes);
 
-        Set<String> predicatedColumnNames = Stream.concat(
-                nonPartitionConstraint.getDomains().orElseThrow().keySet().stream(),
-                columnsCoveredByDynamicFilter.stream()
-                        .map(DeltaLakeColumnHandle.class::cast))
-                .map(column -> column.getBaseColumnName().toLowerCase(ENGLISH)) // TODO is DeltaLakeColumnHandle.name normalized?
-                .collect(toImmutableSet());
-        List<DeltaLakeColumnMetadata> schema = extractSchema(tableHandle.getMetadataEntry(), typeManager);
-        List<DeltaLakeColumnMetadata> predicatedColumns = schema.stream()
-                .filter(column -> predicatedColumnNames.contains(column.getName())) // DeltaLakeColumnMetadata.name is lowercase
-                .collect(toImmutableList());
+        MetadataEntry metadataEntry = tableHandle.getMetadataEntry();
+        boolean isOptimize = tableHandle.isOptimize();
+        Set<Map<String, Optional<String>>> partitionsWithAtMostOneFile = isOptimize ? findPartitionsWithAtMostOneFile(validDataFiles) : ImmutableSet.of();
 
+        Set<String> predicatedColumnNames = Stream.concat(
+                        nonPartitionConstraint.getDomains().orElseThrow().keySet().stream(),
+                        columnsCoveredByDynamicFilter.stream()
+                                .map(DeltaLakeColumnHandle.class::cast))
+                .map(DeltaLakeColumnHandle::getBaseColumnName)
+                .collect(toImmutableSet());
+        List<DeltaLakeColumnMetadata> schema = extractSchema(metadataEntry, tableHandle.getProtocolEntry(), typeManager);
+        List<DeltaLakeColumnMetadata> predicatedColumns = schema.stream()
+                .filter(column -> predicatedColumnNames.contains(column.getName()))
+                .collect(toImmutableList());
         return validDataFiles.stream()
                 .flatMap(addAction -> {
-                    if (tableHandle.getAnalyzeHandle().isPresent() && !tableHandle.getAnalyzeHandle().get().isInitialAnalyze() && !addAction.isDataChange()) {
-                        // skip files which do not introduce data change on non-initial ANALYZE
+                    if (tableHandle.getAnalyzeHandle().isPresent() &&
+                            !(tableHandle.getAnalyzeHandle().get().getAnalyzeMode() == FULL_REFRESH) && !addAction.isDataChange()) {
+                        // skip files which do not introduce data change on non FULL REFRESH
                         return Stream.empty();
                     }
 
@@ -195,7 +202,12 @@ public class DeltaLakeSplitManager
                         return Stream.empty();
                     }
 
-                    if (maxScannedFileSizeInBytes.isPresent() && addAction.getSize() > maxScannedFileSizeInBytes.get()) {
+                    if (addAction.getDeletionVector().isEmpty() && maxScannedFileSizeInBytes.isPresent() && addAction.getSize() > maxScannedFileSizeInBytes.get()) {
+                        return Stream.empty();
+                    }
+
+                    // no need to rewrite small file that is the only one in its partition
+                    if (isOptimize && partitionsWithAtMostOneFile.contains(addAction.getCanonicalPartitionValues()) && maxScannedFileSizeInBytes.isPresent() && addAction.getSize() < maxScannedFileSizeInBytes.get()) {
                         return Stream.empty();
                     }
 
@@ -207,7 +219,7 @@ public class DeltaLakeSplitManager
                     TupleDomain<DeltaLakeColumnHandle> statisticsPredicate = createStatisticsPredicate(
                             addAction,
                             predicatedColumns,
-                            tableHandle.getMetadataEntry().getCanonicalPartitionColumns());
+                            metadataEntry.getLowercasePartitionColumns());
                     if (!nonPartitionConstraint.overlaps(statisticsPredicate)) {
                         return Stream.empty();
                     }
@@ -235,6 +247,14 @@ public class DeltaLakeSplitManager
                             remainingInitialSplits)
                             .stream();
                 });
+    }
+
+    private Set<Map<String, Optional<String>>> findPartitionsWithAtMostOneFile(List<AddFileEntry> addFileEntries)
+    {
+        return addFileEntries.stream().collect(groupingBy(AddFileEntry::getCanonicalPartitionValues, counting())).entrySet().stream()
+                .filter(entry -> entry.getValue() <= 1)
+                .map(Map.Entry::getKey)
+                .collect(toImmutableSet());
     }
 
     private static boolean mayAnyDataColumnProjected(DeltaLakeTableHandle tableHandle)
@@ -291,7 +311,7 @@ public class DeltaLakeSplitManager
                     fileSize,
                     addFileEntry.getStats().flatMap(DeltaLakeFileStatistics::getNumRecords),
                     addFileEntry.getModificationTime(),
-                    ImmutableList.of(),
+                    addFileEntry.getDeletionVector(),
                     SplitWeight.standard(),
                     statisticsPredicate,
                     partitionKeys));
@@ -316,7 +336,7 @@ public class DeltaLakeSplitManager
                     fileSize,
                     Optional.empty(),
                     addFileEntry.getModificationTime(),
-                    ImmutableList.of(),
+                    addFileEntry.getDeletionVector(),
                     SplitWeight.fromProportion(Math.min(Math.max((double) splitSize / maxSplitSize, minimumAssignedSplitWeight), 1.0)),
                     statisticsPredicate,
                     partitionKeys));
@@ -327,7 +347,7 @@ public class DeltaLakeSplitManager
         return splits.build();
     }
 
-    private static Location buildSplitPath(Location tableLocation, AddFileEntry addAction)
+    public static Location buildSplitPath(Location tableLocation, AddFileEntry addAction)
     {
         // paths are relative to the table location and are RFC 2396 URIs
         // https://github.com/delta-io/delta/blob/master/PROTOCOL.md#add-file-and-remove-file

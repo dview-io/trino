@@ -19,7 +19,7 @@ import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
-import io.trino.tempto.BeforeTestWithContext;
+import io.trino.tempto.BeforeMethodWithContext;
 import io.trino.tempto.assertions.QueryAssert;
 import io.trino.testng.services.Flaky;
 import io.trino.tests.product.deltalake.util.DatabricksVersion;
@@ -33,15 +33,16 @@ import java.util.function.Consumer;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
-import static io.trino.tempto.assertions.QueryAssert.assertThat;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS;
-import static io.trino.tests.product.TestGroups.DELTA_LAKE_EXCLUDE_73;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_104;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_113;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_122;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_EXCLUDE_91;
 import static io.trino.tests.product.TestGroups.PROFILE_SPECIFIC_TESTS;
 import static io.trino.tests.product.deltalake.TransactionLogAssertions.assertLastEntryIsCheckpointed;
 import static io.trino.tests.product.deltalake.TransactionLogAssertions.assertTransactionLogVersion;
 import static io.trino.tests.product.deltalake.util.DatabricksVersion.DATABRICKS_104_RUNTIME_VERSION;
-import static io.trino.tests.product.deltalake.util.DatabricksVersion.DATABRICKS_113_RUNTIME_VERSION;
 import static io.trino.tests.product.deltalake.util.DatabricksVersion.DATABRICKS_91_RUNTIME_VERSION;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_ISSUE;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_MATCH;
@@ -63,7 +64,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
     private AmazonS3 s3;
     private DatabricksVersion databricksRuntimeVersion;
 
-    @BeforeTestWithContext
+    @BeforeMethodWithContext
     public void setup()
     {
         super.setUp();
@@ -136,6 +137,18 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testTrinoUsesCheckpointInterval()
     {
+        trinoUsesCheckpointInterval("'delta.checkpointInterval' = '5'");
+    }
+
+    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_91, PROFILE_SPECIFIC_TESTS})
+    @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
+    public void testTrinoUsesCheckpointIntervalWithTableFeature()
+    {
+        trinoUsesCheckpointInterval("'delta.checkpointInterval' = '5', 'delta.feature.columnMapping'='supported'");
+    }
+
+    private void trinoUsesCheckpointInterval(String deltaTableProperties)
+    {
         String tableName = "test_dl_checkpoints_compat_" + randomNameSuffix();
         String tableDirectory = "databricks-compatibility-test-" + tableName;
 
@@ -145,25 +158,13 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
                         "      USING delta" +
                         "      PARTITIONED BY (a_NuMbEr)" +
                         "      LOCATION 's3://%s/%s'" +
-                        "      TBLPROPERTIES ('delta.checkpointInterval' = '5')",
-                tableName, bucketName, tableDirectory));
+                        "      TBLPROPERTIES (%s)",
+                tableName, bucketName, tableDirectory, deltaTableProperties));
 
         try {
             // validate that we can see the checkpoint interval
-            String showCreateTable = format(
-                    "CREATE TABLE delta.default.%s (\n" +
-                            "   a_number integer,\n" +
-                            "   a_string varchar\n" +
-                            ")\n" +
-                            "WITH (\n" +
-                            "   checkpoint_interval = 5,\n" +
-                            "   location = 's3://%s/%s',\n" +
-                            "   partitioned_by = ARRAY['a_number']\n" +
-                            ")",
-                    tableName,
-                    bucketName,
-                    tableDirectory);
-            assertThat(onTrino().executeQuery("SHOW CREATE TABLE delta.default." + tableName)).containsExactlyInOrder(row(showCreateTable));
+            assertThat((String) onTrino().executeQuery("SHOW CREATE TABLE delta.default." + tableName).getOnlyValue())
+                    .contains("checkpoint_interval = 5");
 
             // sanity check
             fillWithInserts("delta.default." + tableName, "(1, 'trino')", 4);
@@ -192,7 +193,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         }
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_DATABRICKS_104, DELTA_LAKE_DATABRICKS_113, DELTA_LAKE_DATABRICKS_122, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testDatabricksUsesCheckpointInterval()
     {
@@ -208,35 +209,8 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
 
         try {
             // validate that Databricks can see the checkpoint interval
-            String showCreateTable;
-            if (databricksRuntimeVersion.isAtLeast(DATABRICKS_104_RUNTIME_VERSION)) {
-                showCreateTable = format(
-                        "CREATE TABLE spark_catalog.default.%s (\n" +
-                                "  a_number BIGINT,\n" +
-                                "  a_string STRING)\n" +
-                                "USING delta\n" +
-                                "PARTITIONED BY (a_number)\n" +
-                                "LOCATION 's3://%s/%s'\n%s",
-                        tableName,
-                        bucketName,
-                        tableDirectory,
-                        getDatabricksTablePropertiesWithCheckpointInterval());
-            }
-            else {
-                showCreateTable = format(
-                        "CREATE TABLE `default`.`%s` (\n" +
-                                "  `a_number` BIGINT,\n" +
-                                "  `a_string` STRING)\n" +
-                                "USING DELTA\n" +
-                                "PARTITIONED BY (a_number)\n" +
-                                "LOCATION 's3://%s/%s'\n" +
-                                "TBLPROPERTIES (\n" +
-                                "  'delta.checkpointInterval' = '3')\n",
-                        tableName,
-                        bucketName,
-                        tableDirectory);
-            }
-            assertThat(onDelta().executeQuery("SHOW CREATE TABLE default." + tableName)).containsExactlyInOrder(row(showCreateTable));
+            assertThat((String) onDelta().executeQuery("SHOW CREATE TABLE default." + tableName).getOnlyValue())
+                    .contains("'delta.checkpointInterval' = '3'");
 
             // sanity check
             onDelta().executeQuery("INSERT INTO default." + tableName + " VALUES (1, 'databricks')");
@@ -258,24 +232,6 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
             // cleanup
             dropDeltaTableWithRetry("default." + tableName);
         }
-    }
-
-    private String getDatabricksTablePropertiesWithCheckpointInterval()
-    {
-        if (databricksRuntimeVersion.isAtLeast(DATABRICKS_113_RUNTIME_VERSION)) {
-            return "TBLPROPERTIES (\n" +
-                    "  'delta.checkpointInterval' = '3',\n" +
-                    "  'delta.minReaderVersion' = '1',\n" +
-                    "  'delta.minWriterVersion' = '2')\n";
-        }
-        if (databricksRuntimeVersion.equals(DATABRICKS_104_RUNTIME_VERSION)) {
-            return "TBLPROPERTIES (\n" +
-                    "  'Type' = 'EXTERNAL',\n" +
-                    "  'delta.checkpointInterval' = '3',\n" +
-                    "  'delta.minReaderVersion' = '1',\n" +
-                    "  'delta.minWriterVersion' = '2')\n";
-        }
-        throw new IllegalArgumentException("Unsupported databricks runtime version: " + databricksRuntimeVersion);
     }
 
     @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
@@ -410,7 +366,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         }
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testTrinoWriteStatsAsJsonDisabled()
     {
@@ -418,7 +374,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         testWriteStatsAsJsonDisabled(sql -> onTrino().executeQuery(sql), tableName, "delta.default." + tableName, 3.0, 1.0);
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testDatabricksWriteStatsAsJsonDisabled()
     {
@@ -453,7 +409,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         }
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testTrinoWriteStatsAsStructDisabled()
     {
@@ -461,7 +417,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         testWriteStatsAsStructDisabled(sql -> onTrino().executeQuery(sql), tableName, "delta.default." + tableName);
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testDatabricksWriteStatsAsStructDisabled()
     {
@@ -497,7 +453,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         }
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS}, dataProvider = "testTrinoCheckpointWriteStatsAsJson")
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS}, dataProvider = "testTrinoCheckpointWriteStatsAsJson")
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testTrinoWriteStatsAsJsonEnabled(String type, String inputValue, Double dataSize, Double distinctValues, Double nullsFraction, Object statsValue)
     {
@@ -505,7 +461,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         testWriteStatsAsJsonEnabled(sql -> onTrino().executeQuery(sql), tableName, "delta.default." + tableName, type, inputValue, dataSize, distinctValues, nullsFraction, statsValue);
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS}, dataProvider = "testDeltaCheckpointWriteStatsAsJson")
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS}, dataProvider = "testDeltaCheckpointWriteStatsAsJson")
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testDatabricksWriteStatsAsJsonEnabled(String type, String inputValue, Double nullsFraction, Object statsValue)
     {
@@ -601,7 +557,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         };
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testTrinoWriteStatsAsStructEnabled()
     {
@@ -609,7 +565,7 @@ public class TestDeltaLakeDatabricksCheckpointsCompatibility
         testWriteStatsAsStructEnabled(sql -> onTrino().executeQuery(sql), tableName, "delta.default." + tableName, 3.0, 1.0);
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_73, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testDatabricksWriteStatsAsStructEnabled()
     {

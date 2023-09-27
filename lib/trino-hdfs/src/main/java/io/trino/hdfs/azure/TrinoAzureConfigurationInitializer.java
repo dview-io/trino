@@ -14,12 +14,11 @@
 package io.trino.hdfs.azure;
 
 import com.google.common.net.HostAndPort;
+import com.google.inject.Inject;
 import io.trino.hdfs.ConfigurationInitializer;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.adl.AdlFileSystem;
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem;
-
-import javax.inject.Inject;
 
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -28,6 +27,8 @@ import java.util.Optional;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.String.format;
+import static org.apache.hadoop.fs.azurebfs.constants.ConfigurationKeys.DATA_BLOCKS_BUFFER;
+import static org.apache.hadoop.fs.store.DataBlocks.DATA_BLOCKS_BUFFER_ARRAY;
 
 public class TrinoAzureConfigurationInitializer
         implements ConfigurationInitializer
@@ -118,6 +119,9 @@ public class TrinoAzureConfigurationInitializer
 
         // do not rely on information returned from local system about users and groups
         config.set("fs.azure.skipUserGroupMetadataDuringInitialization", "true");
+
+        // disable buffering Azure output streams to disk(default is DATA_BLOCKS_BUFFER_DISK)
+        config.set(DATA_BLOCKS_BUFFER, DATA_BLOCKS_BUFFER_ARRAY);
     }
 
     private static Optional<String> dropEmpty(Optional<String> optional)

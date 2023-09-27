@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import com.google.errorprone.annotations.Immutable;
 import io.trino.Session;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.TableProperties;
@@ -66,6 +67,7 @@ import io.trino.sql.planner.plan.TableFinishNode;
 import io.trino.sql.planner.plan.TableFunctionNode;
 import io.trino.sql.planner.plan.TableFunctionProcessorNode;
 import io.trino.sql.planner.plan.TableScanNode;
+import io.trino.sql.planner.plan.TableUpdateNode;
 import io.trino.sql.planner.plan.TableWriterNode;
 import io.trino.sql.planner.plan.TopNNode;
 import io.trino.sql.planner.plan.TopNRankingNode;
@@ -75,8 +77,6 @@ import io.trino.sql.planner.plan.ValuesNode;
 import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.SymbolReference;
-
-import javax.annotation.concurrent.Immutable;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -427,6 +427,13 @@ public final class StreamPropertyDerivations
         public StreamProperties visitTableDelete(TableDeleteNode node, List<StreamProperties> inputProperties)
         {
             // delete only outputs a single row count
+            return StreamProperties.singleStream();
+        }
+
+        @Override
+        public StreamProperties visitTableUpdate(TableUpdateNode node, List<StreamProperties> inputProperties)
+        {
+            // update only outputs a single row count
             return StreamProperties.singleStream();
         }
 

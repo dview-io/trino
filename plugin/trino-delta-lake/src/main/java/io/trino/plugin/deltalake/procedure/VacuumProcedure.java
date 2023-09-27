@@ -14,6 +14,9 @@
 package io.trino.plugin.deltalake.procedure;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
+import com.google.inject.Provider;
 import io.airlift.log.Logger;
 import io.airlift.units.Duration;
 import io.trino.filesystem.FileEntry;
@@ -29,6 +32,7 @@ import io.trino.plugin.deltalake.DeltaLakeSessionProperties;
 import io.trino.plugin.deltalake.DeltaLakeTableHandle;
 import io.trino.plugin.deltalake.transactionlog.AddFileEntry;
 import io.trino.plugin.deltalake.transactionlog.DeltaLakeTransactionLogEntry;
+import io.trino.plugin.deltalake.transactionlog.ProtocolEntry;
 import io.trino.plugin.deltalake.transactionlog.RemoveFileEntry;
 import io.trino.plugin.deltalake.transactionlog.TableSnapshot;
 import io.trino.plugin.deltalake.transactionlog.TransactionLogAccess;
@@ -41,15 +45,13 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.procedure.Procedure;
 import io.trino.spi.procedure.Procedure.Argument;
 
-import javax.inject.Inject;
-import javax.inject.Provider;
-
 import java.io.IOException;
 import java.lang.invoke.MethodHandle;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -57,10 +59,13 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.plugin.base.util.Procedures.checkProcedureArgument;
+import static io.trino.plugin.deltalake.DeltaLakeMetadata.MAX_WRITER_VERSION;
 import static io.trino.plugin.deltalake.DeltaLakeMetadata.checkValidTableHandle;
 import static io.trino.plugin.deltalake.DeltaLakeSessionProperties.getVacuumMinRetention;
+import static io.trino.plugin.deltalake.transactionlog.DeltaLakeSchemaSupport.unsupportedWriterFeatures;
 import static io.trino.plugin.deltalake.transactionlog.TransactionLogUtil.TRANSACTION_LOG_DIRECTORY;
 import static io.trino.plugin.deltalake.transactionlog.TransactionLogUtil.getTransactionLogDir;
+import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static java.lang.String.format;
 import static java.lang.invoke.MethodHandles.lookup;
@@ -172,11 +177,20 @@ public class VacuumProcedure
         accessControl.checkCanInsertIntoTable(null, tableName);
         accessControl.checkCanDeleteFromTable(null, tableName);
 
-        TableSnapshot tableSnapshot = transactionLogAccess.loadSnapshot(tableName, handle.getLocation(), session);
+        TableSnapshot tableSnapshot = transactionLogAccess.getSnapshot(session, tableName, handle.getLocation(), Optional.of(handle.getReadVersion()));
+        ProtocolEntry protocolEntry = transactionLogAccess.getProtocolEntry(session, tableSnapshot);
+        if (protocolEntry.getMinWriterVersion() > MAX_WRITER_VERSION) {
+            throw new TrinoException(NOT_SUPPORTED, "Cannot execute vacuum procedure with %d writer version".formatted(protocolEntry.getMinWriterVersion()));
+        }
+        Set<String> unsupportedWriterFeatures = unsupportedWriterFeatures(protocolEntry.getWriterFeatures().orElse(ImmutableSet.of()));
+        if (!unsupportedWriterFeatures.isEmpty()) {
+            throw new TrinoException(NOT_SUPPORTED, "Cannot execute vacuum procedure with %s writer features".formatted(unsupportedWriterFeatures));
+        }
+
         String tableLocation = tableSnapshot.getTableLocation();
         String transactionLogDir = getTransactionLogDir(tableLocation);
         TrinoFileSystem fileSystem = fileSystemFactory.create(session);
-        String commonPathPrefix = tableLocation + "/";
+        String commonPathPrefix = tableLocation.endsWith("/") ? tableLocation : tableLocation + "/";
         String queryId = session.getQueryId();
 
         // Retain all active files and every file removed by a "recent" transaction (except for the oldest "recent").

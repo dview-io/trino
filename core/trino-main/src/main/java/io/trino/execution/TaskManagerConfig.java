@@ -23,9 +23,8 @@ import io.airlift.units.Duration;
 import io.airlift.units.MaxDuration;
 import io.airlift.units.MinDuration;
 import io.trino.util.PowerOfTwo;
-
-import javax.validation.constraints.Min;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 import java.util.concurrent.TimeUnit;
@@ -46,12 +45,13 @@ import static java.lang.Math.min;
         "task.level-absolute-priority"})
 public class TaskManagerConfig
 {
+    private boolean threadPerDriverSchedulerEnabled;
     private boolean perOperatorCpuTimerEnabled = true;
     private boolean taskCpuTimerEnabled = true;
     private boolean statisticsCpuTimerEnabled = true;
     private DataSize maxPartialAggregationMemoryUsage = DataSize.of(16, Unit.MEGABYTE);
     private DataSize maxPartialTopNMemory = DataSize.of(16, Unit.MEGABYTE);
-    private DataSize maxLocalExchangeBufferSize = DataSize.of(32, Unit.MEGABYTE);
+    private DataSize maxLocalExchangeBufferSize = DataSize.of(128, Unit.MEGABYTE);
     private DataSize maxIndexMemoryUsage = DataSize.of(64, Unit.MEGABYTE);
     private boolean shareIndexLoading;
     private int maxWorkerThreads = Runtime.getRuntime().availableProcessors() * 2;
@@ -79,18 +79,17 @@ public class TaskManagerConfig
     private Duration interruptStuckSplitTasksDetectionInterval = new Duration(2, TimeUnit.MINUTES);
 
     private boolean scaleWritersEnabled = true;
-    // Set the value of default max writer count to the number of processors and cap it to 32. We can do this
-    // because preferred write partitioning is always enabled for local exchange thus partitioned inserts will never
-    // use this property. Hence, there is no risk in terms of more numbers of physical writers which can cause high
-    // resource utilization.
-    private int scaleWritersMaxWriterCount = min(getAvailablePhysicalProcessorCount(), 32);
+    // Set the value of default max writer count to the number of processors * 2 and cap it to 64. We can set this value
+    // higher because preferred write partitioning is always enabled for local exchange thus partitioned inserts will never
+    // use this property. Additionally, we have a mechanism to stop scaling if local memory utilization is high.
+    private int scaleWritersMaxWriterCount = min(getAvailablePhysicalProcessorCount() * 2, 64);
     private int writerCount = 1;
     // Default value of partitioned task writer count should be above 1, otherwise it can create a plan
     // with a single gather exchange node on the coordinator due to a single available processor. Whereas,
     // on the worker nodes due to more available processors, the default value could be above 1. Therefore,
-    // it can cause error due to config mismatch during execution. Additionally, cap it to 32 in order to
+    // it can cause error due to config mismatch during execution. Additionally, cap it to 64 in order to
     // avoid small pages produced by local partitioning exchanges.
-    private int partitionedWriterCount = min(max(nextPowerOfTwo(getAvailablePhysicalProcessorCount()), 2), 32);
+    private int partitionedWriterCount = min(max(nextPowerOfTwo(getAvailablePhysicalProcessorCount() * 2), 2), 64);
     // Default value of task concurrency should be above 1, otherwise it can create a plan with a single gather
     // exchange node on the coordinator due to a single available processor. Whereas, on the worker nodes due to
     // more available processors, the default value could be above 1. Therefore, it can cause error due to config
@@ -107,6 +106,18 @@ public class TaskManagerConfig
     private int taskYieldThreads = 3;
 
     private BigDecimal levelTimeMultiplier = new BigDecimal(2.0);
+
+    @Config("experimental.thread-per-driver-scheduler-enabled")
+    public TaskManagerConfig setThreadPerDriverSchedulerEnabled(boolean enabled)
+    {
+        this.threadPerDriverSchedulerEnabled = enabled;
+        return this;
+    }
+
+    public boolean isThreadPerDriverSchedulerEnabled()
+    {
+        return threadPerDriverSchedulerEnabled;
+    }
 
     @MinDuration("1ms")
     @MaxDuration("10s")

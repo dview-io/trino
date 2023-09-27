@@ -13,6 +13,7 @@
  */
 package io.trino.filesystem;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -20,8 +21,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.stream.Stream;
 
 import static io.trino.filesystem.Locations.appendPath;
-import static io.trino.filesystem.Locations.getFileName;
-import static io.trino.filesystem.Locations.getParent;
+import static io.trino.filesystem.Locations.areDirectoryLocationsEquivalent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -47,6 +47,7 @@ public class TestLocations
 
     @ParameterizedTest
     @MethodSource("locations")
+    @SuppressWarnings("deprecation") // we're testing a deprecated method
     public void testAppendPath(String location, String path, String expected)
     {
         assertThat(appendPath(location, path)).isEqualTo(expected);
@@ -61,6 +62,7 @@ public class TestLocations
 
     @ParameterizedTest
     @MethodSource("invalidLocations")
+    @SuppressWarnings("deprecation") // we're testing a deprecated method
     public void testInvalidLocationInAppendPath(String location, String exceptionMessageRegexp)
     {
         assertThatThrownBy(() -> appendPath(location, "test"))
@@ -68,87 +70,29 @@ public class TestLocations
                 .hasMessageMatching(exceptionMessageRegexp);
     }
 
-    private static Stream<Arguments> testGetFileNameFromLocationData()
+    @Test
+    public void testDirectoryLocationEquivalence()
     {
-        return Stream.of(
-                Arguments.of("", ""),
-                Arguments.of("test_file", "test_file"),
-                Arguments.of("test>file", "test>file"),
-                Arguments.of("test_dir/", ""),
-                Arguments.of("/test_file.txt", "test_file.txt"),
-                Arguments.of("test_dir/test_file.txt", "test_file.txt"),
-                Arguments.of("/test_dir/test_file.txt", "test_file.txt"),
-                Arguments.of("test_dir /test_file.txt", "test_file.txt"),
-                Arguments.of("test_dir  /test_file.txt", "test_file.txt"),
-                Arguments.of("test_<dir  /test_file.txt", "test_file.txt"),
-                Arguments.of("test_dir/test_dir2/", ""),
-                Arguments.of("s3://test_dir/test_file.txt", "test_file.txt"),
-                Arguments.of("s3://test_dir/test_dir2/test_file.txt", "test_file.txt"),
-                Arguments.of("s3://dir_with_space /test_file.txt", "test_file.txt"),
-                Arguments.of("file://test_dir/test_file", "test_file"),
-                Arguments.of("file:/test_dir/test_file", "test_file"));
+        assertDirectoryLocationEquivalence("scheme://authority/", "scheme://authority/", true);
+        assertDirectoryLocationEquivalence("scheme://authority/", "scheme://authority//", false);
+        assertDirectoryLocationEquivalence("scheme://authority/", "scheme://authority///", false);
+        assertDirectoryLocationEquivalence("scheme://userInfo@host:1234/dir", "scheme://userInfo@host:1234/dir/", true);
+        assertDirectoryLocationEquivalence("scheme://authority/some/path", "scheme://authority/some/path", true);
+        assertDirectoryLocationEquivalence("scheme://authority/some/path", "scheme://authority/some/path/", true);
+        assertDirectoryLocationEquivalence("scheme://authority/some/path", "scheme://authority/some/path//", false);
+
+        assertDirectoryLocationEquivalence("scheme://authority/some/path//", "scheme://authority/some/path//", true);
+        assertDirectoryLocationEquivalence("scheme://authority/some/path/", "scheme://authority/some/path//", false);
+        assertDirectoryLocationEquivalence("scheme://authority/some/path//", "scheme://authority/some/path///", false);
+
+        assertDirectoryLocationEquivalence("scheme://authority/some//path", "scheme://authority/some//path/", true);
     }
 
-    @ParameterizedTest
-    @MethodSource("testGetFileNameFromLocationData")
-    public void testGetFileNameFromLocation(String location, String fileName)
+    private static void assertDirectoryLocationEquivalence(String leftLocation, String rightLocation, boolean equivalent)
     {
-        assertThat(getFileName(location)).isEqualTo(fileName);
-    }
-
-    @ParameterizedTest
-    @MethodSource("invalidLocations")
-    public void testGetFileNameFromInvalidLocation(String location, String exceptionMessageRegexp)
-    {
-        assertThatThrownBy(() -> getFileName(location))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageMatching(exceptionMessageRegexp);
-    }
-
-    private static Stream<Arguments> validParentData()
-    {
-        return Stream.of(
-                Arguments.of("test_dir/", "test_dir"),
-                Arguments.of("test_dir/test_file.txt", "test_dir"),
-                Arguments.of("/test_dir/test_file.txt", "/test_dir"),
-                Arguments.of("test_dir /test_file.txt", "test_dir "),
-                Arguments.of("test_dir  /test_file.txt", "test_dir  "),
-                Arguments.of("test_<dir  /test_file.txt", "test_<dir  "),
-                Arguments.of("test_dir/test_dir2/", "test_dir/test_dir2"),
-                Arguments.of("s3:/test_dir/test_file.txt", "s3:/test_dir"),
-                Arguments.of("s3://test_dir/test_file.txt", "s3://test_dir"),
-                Arguments.of("s3://test_dir/test_dir2/test_file.txt", "s3://test_dir/test_dir2"),
-                Arguments.of("s3://dir_with_space /test_file.txt", "s3://dir_with_space "),
-                Arguments.of("file://test_dir/test_file", "file://test_dir"),
-                Arguments.of("file:/test_dir/test_file", "file:/test_dir"));
-    }
-
-    @ParameterizedTest
-    @MethodSource("validParentData")
-    public void testValidParent(String location, String parent)
-    {
-        assertThat(getParent(location)).isEqualTo(parent);
-    }
-
-    private static Stream<Arguments> invalidParentData()
-    {
-        return Stream.of(
-                Arguments.of("location?", "location contains a query string.*"),
-                Arguments.of("location#", "location contains a fragment.*"),
-                Arguments.of("", "Location does not have parent.*"),
-                Arguments.of("test_file", "Location does not have parent.*"),
-                Arguments.of("/test_file.txt", "Location does not have parent.*"),
-                Arguments.of("s3:/test_file", "Location does not have parent.*"),
-                Arguments.of("s3://test_file", "Location does not have parent.*"),
-                Arguments.of("s3:///test_file", "Location does not have parent.*"));
-    }
-
-    @ParameterizedTest
-    @MethodSource("invalidParentData")
-    public void testInvalidParent(String location, String exceptionMessageRegexp)
-    {
-        assertThatThrownBy(() -> getParent(location))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageMatching(exceptionMessageRegexp);
+        assertThat(areDirectoryLocationsEquivalent(Location.of(leftLocation), Location.of(rightLocation))).as("equivalence of '%s' in relation to '%s'", leftLocation, rightLocation)
+                .isEqualTo(equivalent);
+        assertThat(areDirectoryLocationsEquivalent(Location.of(rightLocation), Location.of(leftLocation))).as("equivalence of '%s' in relation to '%s'", rightLocation, leftLocation)
+                .isEqualTo(equivalent);
     }
 }

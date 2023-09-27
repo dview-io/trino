@@ -16,6 +16,7 @@ package io.trino.plugin.hive.parquet;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
@@ -46,7 +47,6 @@ import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
@@ -59,8 +59,6 @@ import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 import org.joda.time.DateTimeZone;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -92,8 +90,6 @@ import static io.trino.plugin.hive.HivePageSourceProvider.projectSufficientColum
 import static io.trino.plugin.hive.HiveSessionProperties.getParquetMaxReadBlockRowCount;
 import static io.trino.plugin.hive.HiveSessionProperties.getParquetMaxReadBlockSize;
 import static io.trino.plugin.hive.HiveSessionProperties.isParquetIgnoreStatistics;
-import static io.trino.plugin.hive.HiveSessionProperties.isParquetOptimizedNestedReaderEnabled;
-import static io.trino.plugin.hive.HiveSessionProperties.isParquetOptimizedReaderEnabled;
 import static io.trino.plugin.hive.HiveSessionProperties.isParquetUseColumnIndex;
 import static io.trino.plugin.hive.HiveSessionProperties.isUseParquetColumnNames;
 import static io.trino.plugin.hive.HiveSessionProperties.useParquetBloomFilter;
@@ -161,7 +157,6 @@ public class ParquetPageSourceFactory
 
     @Override
     public Optional<ReaderPageSource> createPageSource(
-            Configuration configuration,
             ConnectorSession session,
             Location path,
             long start,
@@ -197,9 +192,7 @@ public class ParquetPageSourceFactory
                         .withMaxReadBlockSize(getParquetMaxReadBlockSize(session))
                         .withMaxReadBlockRowCount(getParquetMaxReadBlockRowCount(session))
                         .withUseColumnIndex(isParquetUseColumnIndex(session))
-                        .withBloomFilter(useParquetBloomFilter(session))
-                        .withBatchColumnReaders(isParquetOptimizedReaderEnabled(session))
-                        .withBatchNestedColumnReaders(isParquetOptimizedNestedReaderEnabled(session)),
+                        .withBloomFilter(useParquetBloomFilter(session)),
                 Optional.empty(),
                 domainCompactionThreshold));
     }

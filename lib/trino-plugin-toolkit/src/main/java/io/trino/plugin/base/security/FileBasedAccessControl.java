@@ -108,6 +108,7 @@ public class FileBasedAccessControl
     private final List<TableAccessControlRule> tableRules;
     private final List<SessionPropertyAccessControlRule> sessionPropertyRules;
     private final List<FunctionAccessControlRule> functionRules;
+    private final List<AuthorizationRule> authorizationRules;
     private final Set<AnySchemaPermissionsRule> anySchemaPermissionsRules;
 
     public FileBasedAccessControl(CatalogName catalogName, AccessControlRules rules)
@@ -120,6 +121,7 @@ public class FileBasedAccessControl
         this.tableRules = rules.getTableRules();
         this.sessionPropertyRules = rules.getSessionPropertyRules();
         this.functionRules = rules.getFunctionRules();
+        this.authorizationRules = rules.getAuthorizationRules();
         ImmutableSet.Builder<AnySchemaPermissionsRule> anySchemaPermissionsRules = ImmutableSet.builder();
         schemaRules.stream()
                 .map(SchemaAccessControlRule::toAnySchemaPermissionsRule)
@@ -167,6 +169,9 @@ public class FileBasedAccessControl
     public void checkCanSetSchemaAuthorization(ConnectorSecurityContext context, String schemaName, TrinoPrincipal principal)
     {
         if (!isSchemaOwner(context, schemaName)) {
+            denySetSchemaAuthorization(schemaName, principal);
+        }
+        if (!checkCanSetAuthorization(context, principal)) {
             denySetSchemaAuthorization(schemaName, principal);
         }
     }
@@ -269,6 +274,13 @@ public class FileBasedAccessControl
     }
 
     @Override
+    public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
+    {
+        // Default implementation is good enough. Explicit implementation is expected by the test though.
+        return ConnectorAccessControl.super.filterColumns(context, tableColumns);
+    }
+
+    @Override
     public void checkCanRenameTable(ConnectorSecurityContext context, SchemaTableName tableName, SchemaTableName newTableName)
     {
         // check if user owns the existing table, and if they will be an owner of the table after the rename
@@ -347,6 +359,9 @@ public class FileBasedAccessControl
         if (!checkTablePermission(context, tableName, OWNERSHIP)) {
             denySetTableAuthorization(tableName.toString(), principal);
         }
+        if (!checkCanSetAuthorization(context, principal)) {
+            denySetTableAuthorization(tableName.toString(), principal);
+        }
     }
 
     @Override
@@ -421,6 +436,9 @@ public class FileBasedAccessControl
     public void checkCanSetViewAuthorization(ConnectorSecurityContext context, SchemaTableName viewName, TrinoPrincipal principal)
     {
         if (!checkTablePermission(context, viewName, OWNERSHIP)) {
+            denySetViewAuthorization(viewName.toString(), principal);
+        }
+        if (!checkCanSetAuthorization(context, principal)) {
             denySetViewAuthorization(viewName.toString(), principal);
         }
     }
@@ -596,12 +614,6 @@ public class FileBasedAccessControl
     }
 
     @Override
-    public void checkCanShowRoleAuthorizationDescriptors(ConnectorSecurityContext context)
-    {
-        // allow, no roles are supported so show will always be empty
-    }
-
-    @Override
     public void checkCanShowRoles(ConnectorSecurityContext context)
     {
         // allow, no roles are supported so show will always be empty
@@ -679,12 +691,6 @@ public class FileBasedAccessControl
         return masks.stream().findFirst();
     }
 
-    @Override
-    public List<ViewExpression> getColumnMasks(ConnectorSecurityContext context, SchemaTableName tableName, String columnName, Type type)
-    {
-        throw new UnsupportedOperationException();
-    }
-
     private boolean canSetSessionProperty(ConnectorSecurityContext context, String property)
     {
         ConnectorIdentity identity = context.getIdentity();
@@ -748,5 +754,17 @@ public class FileBasedAccessControl
                 .findFirst()
                 .filter(executePredicate)
                 .isPresent();
+    }
+
+    private boolean checkCanSetAuthorization(ConnectorSecurityContext context, TrinoPrincipal principal)
+    {
+        ConnectorIdentity identity = context.getIdentity();
+        Set<String> roles = identity.getConnectorRole().stream()
+                .flatMap(role -> role.getRole().stream())
+                .collect(toImmutableSet());
+        return authorizationRules.stream()
+                .flatMap(rule -> rule.match(identity.getUser(), identity.getGroups(), roles, principal).stream())
+                .findFirst()
+                .orElse(false);
     }
 }

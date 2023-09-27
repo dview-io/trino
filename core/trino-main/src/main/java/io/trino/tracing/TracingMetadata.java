@@ -15,6 +15,7 @@ package io.trino.tracing;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.inject.Inject;
 import io.airlift.slice.Slice;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
@@ -62,17 +63,22 @@ import io.trino.spi.connector.JoinType;
 import io.trino.spi.connector.LimitApplicationResult;
 import io.trino.spi.connector.MaterializedViewFreshness;
 import io.trino.spi.connector.ProjectionApplicationResult;
+import io.trino.spi.connector.RelationCommentMetadata;
 import io.trino.spi.connector.RowChangeParadigm;
 import io.trino.spi.connector.SampleApplicationResult;
 import io.trino.spi.connector.SampleType;
+import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SortItem;
 import io.trino.spi.connector.SystemTable;
 import io.trino.spi.connector.TableColumnsMetadata;
 import io.trino.spi.connector.TableFunctionApplicationResult;
 import io.trino.spi.connector.TableScanRedirectApplicationResult;
 import io.trino.spi.connector.TopNApplicationResult;
+import io.trino.spi.connector.WriterScalingOptions;
 import io.trino.spi.expression.ConnectorExpression;
+import io.trino.spi.expression.Constant;
 import io.trino.spi.function.AggregationFunctionMetadata;
+import io.trino.spi.function.CatalogSchemaFunctionName;
 import io.trino.spi.function.FunctionMetadata;
 import io.trino.spi.function.OperatorType;
 import io.trino.spi.predicate.TupleDomain;
@@ -89,8 +95,6 @@ import io.trino.sql.analyzer.TypeSignatureProvider;
 import io.trino.sql.planner.PartitioningHandle;
 import io.trino.sql.tree.QualifiedName;
 
-import javax.inject.Inject;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +102,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import static io.airlift.tracing.Tracing.attribute;
 import static io.trino.tracing.ScopedSpan.scopedSpan;
@@ -325,11 +330,20 @@ public class TracingMetadata
     }
 
     @Override
-    public List<TableColumnsMetadata> listTableColumns(Session session, QualifiedTablePrefix prefix)
+    public List<TableColumnsMetadata> listTableColumns(Session session, QualifiedTablePrefix prefix, UnaryOperator<Set<SchemaTableName>> relationFilter)
     {
         Span span = startSpan("listTableColumns", prefix);
         try (var ignored = scopedSpan(span)) {
-            return delegate.listTableColumns(session, prefix);
+            return delegate.listTableColumns(session, prefix, relationFilter);
+        }
+    }
+
+    @Override
+    public List<RelationCommentMetadata> listRelationComments(Session session, String catalogName, Optional<String> schemaName, UnaryOperator<Set<SchemaTableName>> relationFilter)
+    {
+        Span span = startSpan("listRelationComments", new QualifiedTablePrefix(catalogName, schemaName, Optional.empty()));
+        try (var ignored = scopedSpan(span)) {
+            return delegate.listRelationComments(session, catalogName, schemaName, relationFilter);
         }
     }
 
@@ -343,11 +357,11 @@ public class TracingMetadata
     }
 
     @Override
-    public void dropSchema(Session session, CatalogSchemaName schema)
+    public void dropSchema(Session session, CatalogSchemaName schema, boolean cascade)
     {
         Span span = startSpan("dropSchema", schema);
         try (var ignored = scopedSpan(span)) {
-            delegate.dropSchema(session, schema);
+            delegate.dropSchema(session, schema, cascade);
         }
     }
 
@@ -442,6 +456,15 @@ public class TracingMetadata
     }
 
     @Override
+    public void renameField(Session session, TableHandle tableHandle, List<String> fieldPath, String target)
+    {
+        Span span = startSpan("renameField", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            delegate.renameField(session, tableHandle, fieldPath, target);
+        }
+    }
+
+    @Override
     public void addColumn(Session session, TableHandle tableHandle, CatalogSchemaTableName table, ColumnMetadata column)
     {
         Span span = startSpan("addColumn", table);
@@ -451,11 +474,29 @@ public class TracingMetadata
     }
 
     @Override
+    public void addField(Session session, TableHandle tableHandle, List<String> parentPath, String fieldName, Type type, boolean ignoreExisting)
+    {
+        Span span = startSpan("addField", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            delegate.addField(session, tableHandle, parentPath, fieldName, type, ignoreExisting);
+        }
+    }
+
+    @Override
     public void setColumnType(Session session, TableHandle tableHandle, ColumnHandle column, Type type)
     {
         Span span = startSpan("setColumnType", tableHandle);
         try (var ignored = scopedSpan(span)) {
             delegate.setColumnType(session, tableHandle, column, type);
+        }
+    }
+
+    @Override
+    public void setFieldType(Session session, TableHandle tableHandle, List<String> fieldPath, Type type)
+    {
+        Span span = startSpan("setFieldType", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            delegate.setFieldType(session, tableHandle, fieldPath, type);
         }
     }
 
@@ -510,6 +551,15 @@ public class TracingMetadata
         Span span = startSpan("getNewTableLayout", catalogName, tableMetadata);
         try (var ignored = scopedSpan(span)) {
             return delegate.getNewTableLayout(session, catalogName, tableMetadata);
+        }
+    }
+
+    @Override
+    public Optional<Type> getSupportedType(Session session, CatalogHandle catalogHandle, Type type)
+    {
+        Span span = startSpan("getSupportedType", catalogHandle.getCatalogName());
+        try (var ignored = scopedSpan(span)) {
+            return delegate.getSupportedType(session, catalogHandle, type);
         }
     }
 
@@ -654,6 +704,24 @@ public class TracingMetadata
         Span span = startSpan("finishRefreshMaterializedView", tableHandle);
         try (var ignored = scopedSpan(span)) {
             return delegate.finishRefreshMaterializedView(session, tableHandle, insertTableHandle, fragments, computedStatistics, sourceTableHandles);
+        }
+    }
+
+    @Override
+    public Optional<TableHandle> applyUpdate(Session session, TableHandle tableHandle, Map<ColumnHandle, Constant> assignments)
+    {
+        Span span = startSpan("applyUpdate", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            return delegate.applyUpdate(session, tableHandle, assignments);
+        }
+    }
+
+    @Override
+    public OptionalLong executeUpdate(Session session, TableHandle tableHandle)
+    {
+        Span span = startSpan("executeUpdate", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            return delegate.executeUpdate(session, tableHandle);
         }
     }
 
@@ -1115,32 +1183,42 @@ public class TracingMetadata
     }
 
     @Override
-    public ResolvedFunction resolveOperator(Session session, OperatorType operatorType, List<? extends Type> argumentTypes)
+    public ResolvedFunction resolveBuiltinFunction(String name, List<TypeSignatureProvider> parameterTypes)
+    {
+        Span span = startSpan("resolveBuiltinFunction")
+                .setAllAttributes(attribute(TrinoAttributes.FUNCTION, name));
+        try (var ignored = scopedSpan(span)) {
+            return delegate.resolveBuiltinFunction(name, parameterTypes);
+        }
+    }
+
+    @Override
+    public ResolvedFunction resolveOperator(OperatorType operatorType, List<? extends Type> argumentTypes)
             throws OperatorNotFoundException
     {
         // no tracing since it doesn't call any connector
-        return delegate.resolveOperator(session, operatorType, argumentTypes);
+        return delegate.resolveOperator(operatorType, argumentTypes);
     }
 
     @Override
-    public ResolvedFunction getCoercion(Session session, Type fromType, Type toType)
+    public ResolvedFunction getCoercion(Type fromType, Type toType)
     {
         // no tracing since it doesn't call any connector
-        return delegate.getCoercion(session, fromType, toType);
+        return delegate.getCoercion(fromType, toType);
     }
 
     @Override
-    public ResolvedFunction getCoercion(Session session, OperatorType operatorType, Type fromType, Type toType)
+    public ResolvedFunction getCoercion(OperatorType operatorType, Type fromType, Type toType)
     {
         // no tracing since it doesn't call any connector
-        return delegate.getCoercion(session, operatorType, fromType, toType);
+        return delegate.getCoercion(operatorType, fromType, toType);
     }
 
     @Override
-    public ResolvedFunction getCoercion(Session session, QualifiedName name, Type fromType, Type toType)
+    public ResolvedFunction getCoercion(CatalogSchemaFunctionName name, Type fromType, Type toType)
     {
         // no tracing since it doesn't call any connector
-        return delegate.getCoercion(session, name, fromType, toType);
+        return delegate.getCoercion(name, fromType, toType);
     }
 
     @Override
@@ -1154,11 +1232,21 @@ public class TracingMetadata
     }
 
     @Override
+    public boolean isWindowFunction(Session session, QualifiedName name)
+    {
+        Span span = startSpan("isWindowFunction")
+                .setAllAttributes(attribute(TrinoAttributes.FUNCTION, extractFunctionName(name)));
+        try (var ignored = scopedSpan(span)) {
+            return delegate.isWindowFunction(session, name);
+        }
+    }
+
+    @Override
     public FunctionMetadata getFunctionMetadata(Session session, ResolvedFunction resolvedFunction)
     {
         Span span = startSpan("getFunctionMetadata")
                 .setAttribute(TrinoAttributes.CATALOG, resolvedFunction.getCatalogHandle().getCatalogName())
-                .setAttribute(TrinoAttributes.FUNCTION, resolvedFunction.getSignature().getName());
+                .setAttribute(TrinoAttributes.FUNCTION, resolvedFunction.getSignature().getName().toString());
         try (var ignored = scopedSpan(span)) {
             return delegate.getFunctionMetadata(session, resolvedFunction);
         }
@@ -1169,7 +1257,7 @@ public class TracingMetadata
     {
         Span span = startSpan("getAggregationFunctionMetadata")
                 .setAttribute(TrinoAttributes.CATALOG, resolvedFunction.getCatalogHandle().getCatalogName())
-                .setAttribute(TrinoAttributes.FUNCTION, resolvedFunction.getSignature().getName());
+                .setAttribute(TrinoAttributes.FUNCTION, resolvedFunction.getSignature().getName().toString());
         try (var ignored = scopedSpan(span)) {
             return delegate.getAggregationFunctionMetadata(session, resolvedFunction);
         }
@@ -1257,6 +1345,15 @@ public class TracingMetadata
     }
 
     @Override
+    public void setMaterializedViewColumnComment(Session session, QualifiedObjectName viewName, String columnName, Optional<String> comment)
+    {
+        Span span = startSpan("setMaterializedViewColumnComment", viewName);
+        try (var ignored = scopedSpan(span)) {
+            delegate.setMaterializedViewColumnComment(session, viewName, columnName, comment);
+        }
+    }
+
+    @Override
     public Optional<TableScanRedirectApplicationResult> applyTableScanRedirect(Session session, TableHandle tableHandle)
     {
         Span span = startSpan("applyTableScanRedirect", tableHandle);
@@ -1284,24 +1381,6 @@ public class TracingMetadata
     }
 
     @Override
-    public boolean supportsReportingWrittenBytes(Session session, TableHandle tableHandle)
-    {
-        Span span = startSpan("supportsReportingWrittenBytes", tableHandle);
-        try (var ignored = scopedSpan(span)) {
-            return delegate.supportsReportingWrittenBytes(session, tableHandle);
-        }
-    }
-
-    @Override
-    public boolean supportsReportingWrittenBytes(Session session, QualifiedObjectName tableName, Map<String, Object> tableProperties)
-    {
-        Span span = startSpan("supportsReportingWrittenBytes", tableName);
-        try (var ignored = scopedSpan(span)) {
-            return delegate.supportsReportingWrittenBytes(session, tableName, tableProperties);
-        }
-    }
-
-    @Override
     public Optional<TableHandle> getTableHandle(Session session, QualifiedObjectName tableName, Optional<TableVersion> startVersion, Optional<TableVersion> endVersion)
     {
         Span span = startSpan("getTableHandle", tableName);
@@ -1316,6 +1395,24 @@ public class TracingMetadata
         Span span = startSpan("getMaxWriterTasks", catalogName);
         try (var ignored = scopedSpan(span)) {
             return delegate.getMaxWriterTasks(session, catalogName);
+        }
+    }
+
+    @Override
+    public WriterScalingOptions getNewTableWriterScalingOptions(Session session, QualifiedObjectName tableName, Map<String, Object> tableProperties)
+    {
+        Span span = startSpan("getNewTableWriterScalingOptions", tableName);
+        try (var ignored = scopedSpan(span)) {
+            return delegate.getNewTableWriterScalingOptions(session, tableName, tableProperties);
+        }
+    }
+
+    @Override
+    public WriterScalingOptions getInsertWriterScalingOptions(Session session, TableHandle tableHandle)
+    {
+        Span span = startSpan("getInsertWriterScalingOptions", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            return delegate.getInsertWriterScalingOptions(session, tableHandle);
         }
     }
 
@@ -1398,11 +1495,9 @@ public class TracingMetadata
 
     private static Optional<String> extractFunctionName(QualifiedName name)
     {
-        try {
-            return Optional.of(ResolvedFunction.extractFunctionName(name));
+        if (ResolvedFunction.isResolved(name)) {
+            return Optional.of(ResolvedFunction.extractFunctionName(name).toString());
         }
-        catch (IllegalArgumentException e) {
-            return Optional.empty();
-        }
+        return Optional.empty();
     }
 }

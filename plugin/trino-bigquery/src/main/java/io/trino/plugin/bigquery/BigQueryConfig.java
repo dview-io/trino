@@ -20,11 +20,11 @@ import io.airlift.configuration.DefunctConfig;
 import io.airlift.units.Duration;
 import io.airlift.units.MinDuration;
 import io.trino.plugin.base.logging.SessionInterpolatedValues;
-
-import javax.annotation.PostConstruct;
-import javax.validation.constraints.AssertTrue;
-import javax.validation.constraints.Min;
-import javax.validation.constraints.NotNull;
+import jakarta.annotation.PostConstruct;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 
 import java.util.Optional;
 
@@ -59,6 +59,7 @@ public class BigQueryConfig
     private String queryLabelName;
     private String queryLabelFormat;
     private boolean proxyEnabled;
+    private int metadataParallelism = 2;
 
     public Optional<String> getProjectId()
     {
@@ -305,6 +306,21 @@ public class BigQueryConfig
     public BigQueryConfig setProxyEnabled(boolean proxyEnabled)
     {
         this.proxyEnabled = proxyEnabled;
+        return this;
+    }
+
+    @Min(1)
+    @Max(32)
+    public int getMetadataParallelism()
+    {
+        return metadataParallelism;
+    }
+
+    @ConfigDescription("Limits metadata enumeration calls parallelism")
+    @Config("bigquery.metadata.parallelism")
+    public BigQueryConfig setMetadataParallelism(int metadataParallelism)
+    {
+        this.metadataParallelism = metadataParallelism;
         return this;
     }
 

@@ -67,6 +67,7 @@ import java.util.stream.Stream;
 
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static io.airlift.json.JsonCodec.jsonCodec;
+import static io.trino.spi.type.TimeZoneKey.UTC_KEY;
 import static java.lang.String.format;
 import static java.time.Duration.ofMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,7 +106,9 @@ public class TestHttpEventListener
 
         queryContext = new QueryContext(
                 "user",
+                "originalUser",
                 Optional.of("principal"),
+                Set.of(), // enabledRoles
                 Set.of(), // groups
                 Optional.empty(), // traceToken
                 Optional.empty(), // remoteClientAddress
@@ -114,6 +117,7 @@ public class TestHttpEventListener
                 new HashSet<>(), // clientTags
                 new HashSet<>(), // clientCapabilities
                 Optional.of("source"),
+                UTC_KEY.getId(),
                 Optional.of("catalog"),
                 Optional.of("schema"),
                 Optional.of(new ResourceGroupId("name")),

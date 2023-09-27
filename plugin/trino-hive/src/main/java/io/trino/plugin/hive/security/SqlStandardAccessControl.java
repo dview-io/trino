@@ -15,6 +15,7 @@ package io.trino.plugin.hive.security;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.trino.plugin.base.CatalogName;
 import io.trino.plugin.hive.metastore.Database;
 import io.trino.plugin.hive.metastore.HivePrincipal;
@@ -33,8 +34,6 @@ import io.trino.spi.security.RoleGrant;
 import io.trino.spi.security.TrinoPrincipal;
 import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
-
-import javax.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
@@ -99,7 +98,6 @@ import static io.trino.spi.security.AccessDeniedException.denySetViewAuthorizati
 import static io.trino.spi.security.AccessDeniedException.denyShowColumns;
 import static io.trino.spi.security.AccessDeniedException.denyShowCreateSchema;
 import static io.trino.spi.security.AccessDeniedException.denyShowCreateTable;
-import static io.trino.spi.security.AccessDeniedException.denyShowRoleAuthorizationDescriptors;
 import static io.trino.spi.security.AccessDeniedException.denyShowRoles;
 import static io.trino.spi.security.AccessDeniedException.denyTruncateTable;
 import static io.trino.spi.security.AccessDeniedException.denyUpdateTableColumns;
@@ -156,7 +154,7 @@ public class SqlStandardAccessControl
     @Override
     public void checkCanSetSchemaAuthorization(ConnectorSecurityContext context, String schemaName, TrinoPrincipal principal)
     {
-        if (!isDatabaseOwner(context, schemaName)) {
+        if (!isAdmin(context)) {
             denySetSchemaAuthorization(schemaName, principal);
         }
     }
@@ -274,6 +272,13 @@ public class SqlStandardAccessControl
     }
 
     @Override
+    public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
+    {
+        // Default implementation is good enough. Explicit implementation is expected by the test though.
+        return ConnectorAccessControl.super.filterColumns(context, tableColumns);
+    }
+
+    @Override
     public void checkCanAddColumn(ConnectorSecurityContext context, SchemaTableName tableName)
     {
         if (!isTableOwner(context, tableName)) {
@@ -308,7 +313,7 @@ public class SqlStandardAccessControl
     @Override
     public void checkCanSetTableAuthorization(ConnectorSecurityContext context, SchemaTableName tableName, TrinoPrincipal principal)
     {
-        if (!isTableOwner(context, tableName)) {
+        if (!isAdmin(context)) {
             denySetTableAuthorization(tableName.toString(), principal);
         }
     }
@@ -373,7 +378,7 @@ public class SqlStandardAccessControl
     @Override
     public void checkCanSetViewAuthorization(ConnectorSecurityContext context, SchemaTableName viewName, TrinoPrincipal principal)
     {
-        if (!isTableOwner(context, viewName)) {
+        if (!isAdmin(context)) {
             denySetViewAuthorization(viewName.toString(), principal);
         }
     }
@@ -572,14 +577,6 @@ public class SqlStandardAccessControl
     }
 
     @Override
-    public void checkCanShowRoleAuthorizationDescriptors(ConnectorSecurityContext context)
-    {
-        if (!isAdmin(context)) {
-            denyShowRoleAuthorizationDescriptors();
-        }
-    }
-
-    @Override
     public void checkCanShowRoles(ConnectorSecurityContext context)
     {
         if (!isAdmin(context)) {
@@ -635,12 +632,6 @@ public class SqlStandardAccessControl
     public Optional<ViewExpression> getColumnMask(ConnectorSecurityContext context, SchemaTableName tableName, String columnName, Type type)
     {
         return Optional.empty();
-    }
-
-    @Override
-    public List<ViewExpression> getColumnMasks(ConnectorSecurityContext context, SchemaTableName tableName, String columnName, Type type)
-    {
-        return ImmutableList.of();
     }
 
     private boolean isAdmin(ConnectorSecurityContext context)

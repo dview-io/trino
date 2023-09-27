@@ -46,12 +46,11 @@ import io.trino.sql.tree.GenericLiteral;
 import io.trino.sql.tree.LogicalExpression;
 import io.trino.sql.tree.LongLiteral;
 import io.trino.sql.tree.NullLiteral;
-import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.StringLiteral;
 import io.trino.sql.tree.SymbolReference;
 import io.trino.testing.TestingTransactionHandle;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 import java.util.Optional;
@@ -94,7 +93,7 @@ public class TestPushPredicateIntoTableScan
     private TableHandle ordersTableHandle;
     private final TestingFunctionResolution functionResolution = new TestingFunctionResolution();
 
-    @BeforeClass
+    @BeforeAll
     public void setUpBeforeClass()
     {
         pushPredicateIntoTableScan = new PushPredicateIntoTableScan(tester().getPlannerContext(), createTestingTypeAnalyzer(tester().getPlannerContext()), false);
@@ -217,7 +216,7 @@ public class TestPushPredicateIntoTableScan
                                         new ComparisonExpression(
                                                 EQUAL,
                                                 functionResolution
-                                                        .functionCallBuilder(QualifiedName.of("rand"))
+                                                        .functionCallBuilder("rand")
                                                         .build(),
                                                 new GenericLiteral("BIGINT", "42")),
                                         // non-translatable to connector expression
@@ -251,7 +250,7 @@ public class TestPushPredicateIntoTableScan
                                         new ComparisonExpression(
                                                 EQUAL,
                                                 functionResolution
-                                                        .functionCallBuilder(QualifiedName.of("rand"))
+                                                        .functionCallBuilder("rand")
                                                         .build(),
                                                 new GenericLiteral("BIGINT", "42")),
                                         new ComparisonExpression(
@@ -276,7 +275,7 @@ public class TestPushPredicateIntoTableScan
                         new ComparisonExpression(
                                 EQUAL,
                                 functionResolution
-                                        .functionCallBuilder(QualifiedName.of("rand"))
+                                        .functionCallBuilder("rand")
                                         .build(),
                                 new LongLiteral("42")),
                         p.tableScan(
@@ -328,7 +327,7 @@ public class TestPushPredicateIntoTableScan
                                 new ComparisonExpression(
                                         EQUAL,
                                         functionResolution
-                                                .functionCallBuilder(QualifiedName.of("rand"))
+                                                .functionCallBuilder("rand")
                                                 .build(),
                                         new LongLiteral("0"))),
                         p.tableScan(
@@ -340,7 +339,7 @@ public class TestPushPredicateIntoTableScan
                                 new ComparisonExpression(
                                         EQUAL,
                                         functionResolution
-                                                .functionCallBuilder(QualifiedName.of("rand"))
+                                                .functionCallBuilder("rand")
                                                 .build(),
                                         new LongLiteral("0")),
                                 constrainedTableScanWithTableLayout(

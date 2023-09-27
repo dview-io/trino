@@ -23,6 +23,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Streams;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.errorprone.annotations.Immutable;
 import io.trino.metadata.AnalyzeMetadata;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.metadata.ResolvedFunction;
@@ -33,6 +35,7 @@ import io.trino.security.AccessControl;
 import io.trino.security.SecurityContext;
 import io.trino.spi.QueryId;
 import io.trino.spi.connector.CatalogHandle;
+import io.trino.spi.connector.CatalogHandle.CatalogVersion;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnSchema;
 import io.trino.spi.connector.ConnectorTableMetadata;
@@ -41,8 +44,8 @@ import io.trino.spi.eventlistener.ColumnDetail;
 import io.trino.spi.eventlistener.ColumnInfo;
 import io.trino.spi.eventlistener.RoutineInfo;
 import io.trino.spi.eventlistener.TableInfo;
-import io.trino.spi.ptf.Argument;
-import io.trino.spi.ptf.ConnectorTableFunctionHandle;
+import io.trino.spi.function.table.Argument;
+import io.trino.spi.function.table.ConnectorTableFunctionHandle;
 import io.trino.spi.security.Identity;
 import io.trino.spi.type.RowType;
 import io.trino.spi.type.Type;
@@ -82,10 +85,9 @@ import io.trino.sql.tree.Unnest;
 import io.trino.sql.tree.WindowFrame;
 import io.trino.sql.tree.WindowOperation;
 import io.trino.transaction.TransactionId;
+import jakarta.annotation.Nullable;
 
-import javax.annotation.Nullable;
-import javax.annotation.concurrent.Immutable;
-
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -265,7 +267,7 @@ public class Analysis
     {
         return target.map(target -> {
             QualifiedObjectName name = target.getName();
-            return new Output(name.getCatalogName(), name.getSchemaName(), name.getObjectName(), target.getColumns());
+            return new Output(name.getCatalogName(), target.getCatalogVersion(), name.getSchemaName(), name.getObjectName(), target.getColumns());
         });
     }
 
@@ -276,9 +278,9 @@ public class Analysis
         }
     }
 
-    public void setUpdateTarget(QualifiedObjectName targetName, Optional<Table> targetTable, Optional<List<OutputColumn>> targetColumns)
+    public void setUpdateTarget(CatalogVersion catalogVersion, QualifiedObjectName targetName, Optional<Table> targetTable, Optional<List<OutputColumn>> targetColumns)
     {
-        this.target = Optional.of(new UpdateTarget(targetName, targetTable, targetColumns));
+        this.target = Optional.of(new UpdateTarget(catalogVersion, targetName, targetTable, targetColumns));
     }
 
     public boolean isUpdateTarget(Table table)
@@ -1153,7 +1155,7 @@ public class Analysis
     public List<RoutineInfo> getRoutines()
     {
         return resolvedFunctions.values().stream()
-                .map(value -> new RoutineInfo(value.function.getSignature().getName(), value.getAuthorization()))
+                .map(value -> new RoutineInfo(value.function.getSignature().getName().getFunctionName(), value.getAuthorization()))
                 .collect(toImmutableList());
     }
 
@@ -1686,6 +1688,30 @@ public class Analysis
         {
             return frameInherited;
         }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            ResolvedWindow that = (ResolvedWindow) o;
+            return partitionByInherited == that.partitionByInherited &&
+                    orderByInherited == that.orderByInherited &&
+                    frameInherited == that.frameInherited &&
+                    partitionBy.equals(that.partitionBy) &&
+                    orderBy.equals(that.orderBy) &&
+                    frame.equals(that.frame);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(partitionBy, orderBy, frame, partitionByInherited, orderByInherited, frameInherited);
+        }
     }
 
     public static class MergeAnalysis
@@ -1816,9 +1842,9 @@ public class Analysis
             return accessControl;
         }
 
-        public SecurityContext getSecurityContext(TransactionId transactionId, QueryId queryId)
+        public SecurityContext getSecurityContext(TransactionId transactionId, QueryId queryId, Instant queryStart)
         {
-            return new SecurityContext(transactionId, identity, queryId);
+            return new SecurityContext(transactionId, identity, queryId, queryStart);
         }
 
         @Override
@@ -2038,15 +2064,22 @@ public class Analysis
 
     private static class UpdateTarget
     {
+        private final CatalogVersion catalogVersion;
         private final QualifiedObjectName name;
         private final Optional<Table> table;
         private final Optional<List<OutputColumn>> columns;
 
-        public UpdateTarget(QualifiedObjectName name, Optional<Table> table, Optional<List<OutputColumn>> columns)
+        public UpdateTarget(CatalogVersion catalogVersion, QualifiedObjectName name, Optional<Table> table, Optional<List<OutputColumn>> columns)
         {
+            this.catalogVersion = requireNonNull(catalogVersion, "catalogVersion is null");
             this.name = requireNonNull(name, "name is null");
             this.table = requireNonNull(table, "table is null");
             this.columns = columns.map(ImmutableList::copyOf);
+        }
+
+        private CatalogVersion getCatalogVersion()
+        {
+            return catalogVersion;
         }
 
         public QualifiedObjectName getName()
@@ -2176,48 +2209,56 @@ public class Analysis
 
             private Builder() {}
 
+            @CanIgnoreReturnValue
             public Builder withArgumentName(String argumentName)
             {
                 this.argumentName = argumentName;
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withName(QualifiedName name)
             {
                 this.name = Optional.of(name);
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withRelation(Relation relation)
             {
                 this.relation = relation;
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withPartitionBy(List<Expression> partitionBy)
             {
                 this.partitionBy = Optional.of(partitionBy);
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withOrderBy(OrderBy orderBy)
             {
                 this.orderBy = Optional.of(orderBy);
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withPruneWhenEmpty(boolean pruneWhenEmpty)
             {
                 this.pruneWhenEmpty = pruneWhenEmpty;
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withRowSemantics(boolean rowSemantics)
             {
                 this.rowSemantics = rowSemantics;
                 return this;
             }
 
+            @CanIgnoreReturnValue
             public Builder withPassThroughColumns(boolean passThroughColumns)
             {
                 this.passThroughColumns = passThroughColumns;

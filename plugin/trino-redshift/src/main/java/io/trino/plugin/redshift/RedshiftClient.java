@@ -16,11 +16,14 @@ package io.trino.plugin.redshift;
 import com.amazon.redshift.jdbc.RedshiftPreparedStatement;
 import com.amazon.redshift.util.RedshiftObject;
 import com.google.common.base.CharMatcher;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.airlift.slice.Slice;
 import io.trino.plugin.base.aggregation.AggregateFunctionRewriter;
 import io.trino.plugin.base.aggregation.AggregateFunctionRule;
 import io.trino.plugin.base.expression.ConnectorExpressionRewriter;
+import io.trino.plugin.base.mapping.IdentifierMapping;
 import io.trino.plugin.jdbc.BaseJdbcClient;
 import io.trino.plugin.jdbc.BaseJdbcConfig;
 import io.trino.plugin.jdbc.ColumnMapping;
@@ -55,12 +58,12 @@ import io.trino.plugin.jdbc.aggregation.ImplementVarianceSamp;
 import io.trino.plugin.jdbc.expression.JdbcConnectorExpressionRewriterBuilder;
 import io.trino.plugin.jdbc.expression.ParameterizedExpression;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
-import io.trino.plugin.jdbc.mapping.IdentifierMapping;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.AggregateFunction;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.ConnectorSession;
+import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.JoinCondition;
 import io.trino.spi.connector.JoinStatistics;
 import io.trino.spi.connector.JoinType;
@@ -78,8 +81,6 @@ import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
-
-import javax.inject.Inject;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -176,6 +177,7 @@ import static java.lang.Math.floorMod;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.String.format;
+import static java.lang.String.join;
 import static java.math.RoundingMode.UNNECESSARY;
 import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 import static java.util.Objects.requireNonNull;
@@ -305,10 +307,41 @@ public class RedshiftClient
     }
 
     @Override
-    public Optional<String> getTableComment(ResultSet resultSet)
+    protected void dropSchema(ConnectorSession session, Connection connection, String remoteSchemaName, boolean cascade)
+            throws SQLException
     {
-        // Don't return a comment until the connector supports creating tables with comment
-        return Optional.empty();
+        if (cascade) {
+            // Dropping schema with cascade option may lead to other metadata listing operations. Disable until finding the solution.
+            throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping schemas with CASCADE option");
+        }
+        execute(session, connection, "DROP SCHEMA " + quoted(remoteSchemaName));
+    }
+
+    @Override
+    protected List<String> createTableSqls(RemoteTableName remoteTableName, List<String> columns, ConnectorTableMetadata tableMetadata)
+    {
+        checkArgument(tableMetadata.getProperties().isEmpty(), "Unsupported table properties: %s", tableMetadata.getProperties());
+        ImmutableList.Builder<String> createTableSqlsBuilder = ImmutableList.builder();
+        createTableSqlsBuilder.add(format("CREATE TABLE %s (%s)", quoted(remoteTableName), join(", ", columns)));
+        Optional<String> tableComment = tableMetadata.getComment();
+        if (tableComment.isPresent()) {
+            createTableSqlsBuilder.add(buildTableCommentSql(remoteTableName, tableComment));
+        }
+        return createTableSqlsBuilder.build();
+    }
+
+    @Override
+    public void setTableComment(ConnectorSession session, JdbcTableHandle handle, Optional<String> comment)
+    {
+        execute(session, buildTableCommentSql(handle.asPlainTable().getRemoteTableName(), comment));
+    }
+
+    private String buildTableCommentSql(RemoteTableName remoteTableName, Optional<String> tableComment)
+    {
+        return format(
+                "COMMENT ON TABLE %s IS %s",
+                quoted(remoteTableName),
+                tableComment.map(RedshiftClient::redshiftVarcharLiteral).orElse("NULL"));
     }
 
     @Override
@@ -429,6 +462,7 @@ public class RedshiftClient
         checkArgument(handle.isNamedRelation(), "Unable to delete from synthetic table: %s", handle);
         checkArgument(handle.getLimit().isEmpty(), "Unable to delete when limit is set: %s", handle);
         checkArgument(handle.getSortOrder().isEmpty(), "Unable to delete when sort order is set: %s", handle);
+        checkArgument(handle.getUpdateAssignments().isEmpty(), "Unable to delete when update assignments are set: %s", handle);
         try (Connection connection = connectionFactory.openConnection(session)) {
             verify(connection.getAutoCommit());
             PreparedQuery preparedQuery = queryBuilder.prepareDeleteQuery(this, session, connection, handle.getRequiredNamedRelation(), handle.getConstraint(), Optional.empty());
@@ -437,6 +471,35 @@ public class RedshiftClient
                 // connection.getAutoCommit() == true is not enough to make DELETE effective and explicit commit is required
                 connection.commit();
                 return OptionalLong.of(affectedRowsCount);
+            }
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
+    }
+
+    @Override
+    public OptionalLong update(ConnectorSession session, JdbcTableHandle handle)
+    {
+        checkArgument(handle.isNamedRelation(), "Unable to update from synthetic table: %s", handle);
+        checkArgument(handle.getLimit().isEmpty(), "Unable to update when limit is set: %s", handle);
+        checkArgument(handle.getSortOrder().isEmpty(), "Unable to update when sort order is set: %s", handle);
+        checkArgument(!handle.getUpdateAssignments().isEmpty(), "Unable to update when update assignments are not set: %s", handle);
+        try (Connection connection = connectionFactory.openConnection(session)) {
+            verify(connection.getAutoCommit());
+            PreparedQuery preparedQuery = queryBuilder.prepareUpdateQuery(
+                    this,
+                    session,
+                    connection,
+                    handle.getRequiredNamedRelation(),
+                    handle.getConstraint(),
+                    getAdditionalPredicate(handle.getConstraintExpressions(), Optional.empty()),
+                    handle.getUpdateAssignments());
+            try (PreparedStatement preparedStatement = queryBuilder.prepareStatement(this, session, connection, preparedQuery, Optional.empty())) {
+                int affectedRows = preparedStatement.executeUpdate();
+                // connection.getAutoCommit() == true is not enough to make UPDATE effective and explicit commit is required
+                connection.commit();
+                return OptionalLong.of(affectedRows);
             }
         }
         catch (SQLException e) {
@@ -576,8 +639,10 @@ public class RedshiftClient
                         longTimestampWithTimeZoneWriteFunction()));
         }
 
-        // Fall back to default behavior
-        return legacyToColumnMapping(session, type);
+        if (getUnsupportedTypeHandling(session) == CONVERT_TO_VARCHAR) {
+            return mapToUnboundedVarchar(type);
+        }
+        return Optional.empty();
     }
 
     private Optional<ColumnMapping> legacyToColumnMapping(ConnectorSession session, JdbcTypeHandle typeHandle)
@@ -696,10 +761,7 @@ public class RedshiftClient
             return WriteMapping.objectMapping("timestamptz", longTimestampWithTimeZoneWriteFunction());
         }
 
-        // Fall back to legacy behavior
-        // TODO we should not fall back to legacy behavior, the mappings should be explicit (the legacyToWriteMapping
-        //  is just a copy of some generic default mappings that used to exist)
-        return legacyToWriteMapping(type);
+        throw new TrinoException(NOT_SUPPORTED, "Unsupported column type: " + type.getDisplayName());
     }
 
     @Override

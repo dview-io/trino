@@ -13,6 +13,7 @@
  */
 package io.trino.plugin.base.classloader;
 
+import com.google.inject.Inject;
 import io.trino.spi.classloader.ThreadContextClassLoader;
 import io.trino.spi.connector.ConnectorAccessControl;
 import io.trino.spi.connector.ConnectorSecurityContext;
@@ -23,8 +24,6 @@ import io.trino.spi.security.Privilege;
 import io.trino.spi.security.TrinoPrincipal;
 import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
-
-import javax.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
@@ -195,6 +194,14 @@ public class ClassLoaderSafeConnectorAccessControl
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
             return delegate.filterColumns(context, tableName, columns);
+        }
+    }
+
+    @Override
+    public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
+    {
+        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
+            return delegate.filterColumns(context, tableColumns);
         }
     }
 
@@ -471,14 +478,6 @@ public class ClassLoaderSafeConnectorAccessControl
     }
 
     @Override
-    public void checkCanShowRoleAuthorizationDescriptors(ConnectorSecurityContext context)
-    {
-        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
-            delegate.checkCanShowRoleAuthorizationDescriptors(context);
-        }
-    }
-
-    @Override
     public void checkCanShowRoles(ConnectorSecurityContext context)
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
@@ -539,14 +538,6 @@ public class ClassLoaderSafeConnectorAccessControl
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
             return delegate.getColumnMask(context, tableName, columnName, type);
-        }
-    }
-
-    @Override
-    public List<ViewExpression> getColumnMasks(ConnectorSecurityContext context, SchemaTableName tableName, String columnName, Type type)
-    {
-        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
-            return delegate.getColumnMasks(context, tableName, columnName, type);
         }
     }
 }

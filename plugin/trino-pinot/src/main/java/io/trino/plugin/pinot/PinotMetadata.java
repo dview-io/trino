@@ -20,7 +20,8 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import io.trino.collect.cache.NonEvictableLoadingCache;
+import com.google.inject.Inject;
+import io.trino.cache.NonEvictableLoadingCache;
 import io.trino.plugin.base.aggregation.AggregateFunctionRewriter;
 import io.trino.plugin.base.aggregation.AggregateFunctionRule;
 import io.trino.plugin.base.expression.ConnectorExpressionRewriter;
@@ -57,8 +58,6 @@ import io.trino.spi.type.ArrayType;
 import io.trino.spi.type.Type;
 import org.apache.pinot.spi.data.Schema;
 
-import javax.inject.Inject;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,7 +75,7 @@ import static com.google.common.cache.CacheLoader.asyncReloading;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.Iterables.getOnlyElement;
-import static io.trino.collect.cache.SafeCaches.buildNonEvictableCache;
+import static io.trino.cache.SafeCaches.buildNonEvictableCache;
 import static io.trino.plugin.pinot.PinotSessionProperties.isAggregationPushdownEnabled;
 import static io.trino.plugin.pinot.query.AggregateExpression.replaceIdentifier;
 import static io.trino.plugin.pinot.query.DynamicTablePqlExtractor.quoteIdentifier;

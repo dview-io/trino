@@ -14,12 +14,12 @@
 package io.trino.plugin.hive.fs;
 
 import io.trino.filesystem.Location;
-
-import javax.annotation.Nullable;
+import jakarta.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.NoSuchElementException;
 
+import static io.trino.filesystem.Locations.areDirectoryLocationsEquivalent;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -69,7 +69,7 @@ public class DirectoryListingFilter
         while (delegateIterator.hasNext()) {
             TrinoFileStatus candidate = delegateIterator.next();
             Location parent = Location.of(candidate.getPath()).parentDirectory();
-            boolean directChild = parent.equals(prefix);
+            boolean directChild = areDirectoryLocationsEquivalent(parent, prefix);
 
             if (!directChild && failOnUnexpectedFiles && !parentIsHidden(parent, prefix)) {
                 throw new HiveFileIterator.NestedDirectoryNotAllowedException(candidate.getPath());

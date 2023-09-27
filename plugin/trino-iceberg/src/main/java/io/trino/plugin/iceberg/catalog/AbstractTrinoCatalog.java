@@ -70,6 +70,7 @@ import static io.trino.plugin.hive.HiveMetadata.TABLE_COMMENT;
 import static io.trino.plugin.hive.ViewReaderUtil.ICEBERG_MATERIALIZED_VIEW_COMMENT;
 import static io.trino.plugin.hive.ViewReaderUtil.PRESTO_VIEW_FLAG;
 import static io.trino.plugin.hive.metastore.glue.converter.GlueToTrinoConverter.mappedCopy;
+import static io.trino.plugin.hive.util.HiveUtil.escapeTableName;
 import static io.trino.plugin.iceberg.IcebergErrorCode.ICEBERG_FILESYSTEM_ERROR;
 import static io.trino.plugin.iceberg.IcebergMaterializedViewAdditionalProperties.STORAGE_SCHEMA;
 import static io.trino.plugin.iceberg.IcebergMaterializedViewAdditionalProperties.getStorageSchema;
@@ -203,11 +204,11 @@ public abstract class AbstractTrinoCatalog
 
     protected String createNewTableName(String baseTableName)
     {
-        String tableName = baseTableName;
+        String tableNameLocationComponent = escapeTableName(baseTableName);
         if (useUniqueTableLocation) {
-            tableName += "-" + randomUUID().toString().replace("-", "");
+            tableNameLocationComponent += "-" + randomUUID().toString().replace("-", "");
         }
-        return tableName;
+        return tableNameLocationComponent;
     }
 
     protected void deleteTableDirectory(TrinoFileSystem fileSystem, SchemaTableName schemaTableName, String tableLocation)
@@ -344,9 +345,7 @@ public abstract class AbstractTrinoCatalog
                 Optional.of(new CatalogSchemaTableName(catalogName.toString(), storageTableName)),
                 definition.getCatalog(),
                 definition.getSchema(),
-                definition.getColumns().stream()
-                        .map(column -> new ConnectorMaterializedViewDefinition.Column(column.getName(), column.getType()))
-                        .collect(toImmutableList()),
+                toSpiMaterializedViewColumns(definition.getColumns()),
                 definition.getGracePeriod(),
                 definition.getComment(),
                 owner,
@@ -354,6 +353,13 @@ public abstract class AbstractTrinoCatalog
                         .putAll(getIcebergTableProperties(icebergTable))
                         .put(STORAGE_SCHEMA, storageTableName.getSchemaName())
                         .buildOrThrow());
+    }
+
+    protected List<ConnectorMaterializedViewDefinition.Column> toSpiMaterializedViewColumns(List<IcebergMaterializedViewDefinition.Column> columns)
+    {
+        return columns.stream()
+                .map(column -> new ConnectorMaterializedViewDefinition.Column(column.getName(), column.getType(), column.getComment()))
+                .collect(toImmutableList());
     }
 
     protected Map<String, String> createMaterializedViewProperties(ConnectorSession session, SchemaTableName storageTableName)

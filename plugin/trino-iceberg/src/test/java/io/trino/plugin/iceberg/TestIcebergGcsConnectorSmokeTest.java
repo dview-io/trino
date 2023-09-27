@@ -14,23 +14,9 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Resources;
 import io.airlift.log.Logger;
 import io.trino.filesystem.Location;
-import io.trino.filesystem.TrinoFileSystem;
-import io.trino.filesystem.TrinoFileSystemFactory;
-import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
-import io.trino.hdfs.ConfigurationInitializer;
-import io.trino.hdfs.DynamicHdfsConfiguration;
-import io.trino.hdfs.HdfsConfig;
-import io.trino.hdfs.HdfsConfiguration;
-import io.trino.hdfs.HdfsConfigurationInitializer;
-import io.trino.hdfs.HdfsEnvironment;
-import io.trino.hdfs.TrinoHdfsFileSystemStats;
-import io.trino.hdfs.authentication.NoHdfsAuthentication;
-import io.trino.hdfs.gcs.GoogleGcsConfigurationInitializer;
-import io.trino.hdfs.gcs.HiveGcsConfig;
 import io.trino.plugin.hive.containers.HiveHadoop;
 import io.trino.plugin.hive.metastore.HiveMetastore;
 import io.trino.plugin.hive.metastore.thrift.BridgingHiveMetastore;
@@ -40,9 +26,7 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,7 +37,6 @@ import java.util.Base64;
 import static io.trino.plugin.hive.TestingThriftHiveMetastoreBuilder.testingThriftHiveMetastoreBuilder;
 import static io.trino.plugin.hive.containers.HiveHadoop.HIVE3_IMAGE;
 import static io.trino.plugin.iceberg.IcebergTestUtils.checkOrcFileSorting;
-import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -72,7 +55,6 @@ public class TestIcebergGcsConnectorSmokeTest
     private final String schema;
 
     private HiveHadoop hiveHadoop;
-    private TrinoFileSystemFactory fileSystemFactory;
 
     @Parameters({"testing.gcp-storage-bucket", "testing.gcp-credentials-key"})
     public TestIcebergGcsConnectorSmokeTest(String gcpStorageBucket, String gcpCredentialKey)
@@ -87,11 +69,11 @@ public class TestIcebergGcsConnectorSmokeTest
     protected QueryRunner createQueryRunner()
             throws Exception
     {
-        InputStream jsonKey = new ByteArrayInputStream(Base64.getDecoder().decode(gcpCredentialKey));
-        Path gcpCredentialsFile;
-        gcpCredentialsFile = Files.createTempFile("gcp-credentials", ".json", READ_ONLY_PERMISSIONS);
+        byte[] jsonKeyBytes = Base64.getDecoder().decode(gcpCredentialKey);
+        Path gcpCredentialsFile = Files.createTempFile("gcp-credentials", ".json", READ_ONLY_PERMISSIONS);
         gcpCredentialsFile.toFile().deleteOnExit();
-        Files.write(gcpCredentialsFile, jsonKey.readAllBytes());
+        Files.write(gcpCredentialsFile, jsonKeyBytes);
+        String gcpCredentials = new String(jsonKeyBytes, UTF_8);
 
         String gcpSpecificCoreSiteXmlContent = Resources.toString(Resources.getResource("hdp3.1-core-site.xml.gcs-template"), UTF_8)
                 .replace("%GCP_CREDENTIALS_FILE_PATH%", "/etc/hadoop/conf/gcp-credentials.json");
@@ -108,16 +90,10 @@ public class TestIcebergGcsConnectorSmokeTest
                 .build());
         this.hiveHadoop.start();
 
-        HiveGcsConfig gcsConfig = new HiveGcsConfig().setJsonKeyFilePath(gcpCredentialsFile.toAbsolutePath().toString());
-        ConfigurationInitializer configurationInitializer = new GoogleGcsConfigurationInitializer(gcsConfig);
-        HdfsConfigurationInitializer initializer = new HdfsConfigurationInitializer(new HdfsConfig(), ImmutableSet.of(configurationInitializer));
-        HdfsConfiguration hdfsConfiguration = new DynamicHdfsConfiguration(initializer, ImmutableSet.of());
-        this.fileSystemFactory = new HdfsFileSystemFactory(new HdfsEnvironment(hdfsConfiguration, new HdfsConfig(), new NoHdfsAuthentication()), new TrinoHdfsFileSystemStats());
-
         return IcebergQueryRunner.builder()
                 .setIcebergProperties(ImmutableMap.<String, String>builder()
                         .put("iceberg.catalog.type", "hive_metastore")
-                        .put("hive.gcs.json-key-file-path", gcpCredentialsFile.toAbsolutePath().toString())
+                        .put("hive.gcs.json-key", gcpCredentials)
                         .put("hive.metastore.uri", "thrift://" + hiveHadoop.getHiveMetastoreEndpoint())
                         .put("iceberg.file-format", format.name())
                         .put("iceberg.register-table-procedure.enabled", "true")
@@ -136,7 +112,6 @@ public class TestIcebergGcsConnectorSmokeTest
     public void removeTestData()
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
             fileSystem.deleteDirectory(Location.of(schemaPath()));
         }
         catch (IOException e) {
@@ -174,7 +149,6 @@ public class TestIcebergGcsConnectorSmokeTest
     protected boolean locationExists(String location)
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
             return fileSystem.newInputFile(Location.of(location)).exists();
         }
         catch (IOException e) {
@@ -219,7 +193,6 @@ public class TestIcebergGcsConnectorSmokeTest
     protected void deleteDirectory(String location)
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
             fileSystem.deleteDirectory(Location.of(location));
         }
         catch (IOException e) {
@@ -230,6 +203,6 @@ public class TestIcebergGcsConnectorSmokeTest
     @Override
     protected boolean isFileSorted(Location path, String sortColumnName)
     {
-        return checkOrcFileSorting(fileSystemFactory, path, sortColumnName);
+        return checkOrcFileSorting(fileSystem, path, sortColumnName);
     }
 }

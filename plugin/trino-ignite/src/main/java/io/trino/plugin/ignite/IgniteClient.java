@@ -17,9 +17,11 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.trino.plugin.base.aggregation.AggregateFunctionRewriter;
 import io.trino.plugin.base.aggregation.AggregateFunctionRule;
 import io.trino.plugin.base.expression.ConnectorExpressionRewriter;
+import io.trino.plugin.base.mapping.IdentifierMapping;
 import io.trino.plugin.jdbc.BaseJdbcClient;
 import io.trino.plugin.jdbc.BaseJdbcConfig;
 import io.trino.plugin.jdbc.ColumnMapping;
@@ -46,7 +48,6 @@ import io.trino.plugin.jdbc.aggregation.ImplementSum;
 import io.trino.plugin.jdbc.expression.JdbcConnectorExpressionRewriterBuilder;
 import io.trino.plugin.jdbc.expression.ParameterizedExpression;
 import io.trino.plugin.jdbc.logging.RemoteQueryModifier;
-import io.trino.plugin.jdbc.mapping.IdentifierMapping;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.AggregateFunction;
 import io.trino.spi.connector.ColumnHandle;
@@ -65,9 +66,7 @@ import io.trino.spi.type.Decimals;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
-
-import javax.annotation.Nullable;
-import javax.inject.Inject;
+import jakarta.annotation.Nullable;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -597,7 +596,7 @@ public class IgniteClient
     }
 
     @Override
-    public void dropSchema(ConnectorSession session, String schemaName)
+    public void dropSchema(ConnectorSession session, String schemaName, boolean cascade)
     {
         throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping schemas");
     }

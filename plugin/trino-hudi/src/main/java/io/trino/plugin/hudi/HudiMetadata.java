@@ -15,12 +15,8 @@ package io.trino.plugin.hudi;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import io.airlift.log.Logger;
-import io.trino.filesystem.FileIterator;
 import io.trino.filesystem.Location;
-import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
-import io.trino.hdfs.HdfsEnvironment;
 import io.trino.plugin.base.classloader.ClassLoaderSafeSystemTable;
 import io.trino.plugin.hive.HiveColumnHandle;
 import io.trino.plugin.hive.metastore.Column;
@@ -43,7 +39,6 @@ import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.TypeManager;
 
-import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -60,33 +55,30 @@ import static io.trino.plugin.hive.HiveTimestampPrecision.NANOSECONDS;
 import static io.trino.plugin.hive.util.HiveUtil.columnMetadataGetter;
 import static io.trino.plugin.hive.util.HiveUtil.hiveColumnHandles;
 import static io.trino.plugin.hive.util.HiveUtil.isHiveSystemSchema;
-import static io.trino.plugin.hudi.HudiErrorCode.HUDI_FILESYSTEM_ERROR;
+import static io.trino.plugin.hive.util.HiveUtil.isHudiTable;
+import static io.trino.plugin.hudi.HudiErrorCode.HUDI_BAD_DATA;
 import static io.trino.plugin.hudi.HudiSessionProperties.getColumnsToHide;
 import static io.trino.plugin.hudi.HudiTableProperties.LOCATION_PROPERTY;
 import static io.trino.plugin.hudi.HudiTableProperties.PARTITIONED_BY_PROPERTY;
-import static io.trino.plugin.hudi.model.HoodieTableType.COPY_ON_WRITE;
+import static io.trino.plugin.hudi.HudiUtil.hudiMetadataExists;
+import static io.trino.plugin.hudi.model.HudiTableType.COPY_ON_WRITE;
 import static io.trino.spi.StandardErrorCode.UNSUPPORTED_TABLE_TYPE;
 import static io.trino.spi.connector.SchemaTableName.schemaTableName;
 import static java.lang.String.format;
 import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
-import static org.apache.hudi.common.table.HoodieTableMetaClient.METAFOLDER_NAME;
 
 public class HudiMetadata
         implements ConnectorMetadata
 {
-    public static final Logger log = Logger.get(HudiMetadata.class);
-
     private final HiveMetastore metastore;
-    private final HdfsEnvironment hdfsEnvironment;
     private final TrinoFileSystemFactory fileSystemFactory;
     private final TypeManager typeManager;
 
-    public HudiMetadata(HiveMetastore metastore, HdfsEnvironment hdfsEnvironment, TrinoFileSystemFactory fileSystemFactory, TypeManager typeManager)
+    public HudiMetadata(HiveMetastore metastore, TrinoFileSystemFactory fileSystemFactory, TypeManager typeManager)
     {
         this.metastore = requireNonNull(metastore, "metastore is null");
-        this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
         this.fileSystemFactory = requireNonNull(fileSystemFactory, "fileSystemFactory is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
     }
@@ -109,9 +101,14 @@ public class HudiMetadata
         if (table.isEmpty()) {
             return null;
         }
-        if (!isHudiTable(session, table.get())) {
+        if (!isHudiTable(table.get())) {
             throw new TrinoException(UNSUPPORTED_TABLE_TYPE, format("Not a Hudi table: %s", tableName));
         }
+        Location location = Location.of(table.get().getStorage().getLocation());
+        if (!hudiMetadataExists(fileSystemFactory.create(session), location)) {
+            throw new TrinoException(HUDI_BAD_DATA, "Location of table %s does not contain Hudi table metadata: %s".formatted(tableName, location));
+        }
+
         return new HudiTableHandle(
                 tableName.getSchemaName(),
                 tableName.getTableName(),
@@ -124,11 +121,11 @@ public class HudiMetadata
     @Override
     public Optional<SystemTable> getSystemTable(ConnectorSession session, SchemaTableName tableName)
     {
-        return getRawSystemTable(tableName)
+        return getRawSystemTable(tableName, session)
                 .map(systemTable -> new ClassLoaderSafeSystemTable(systemTable, getClass().getClassLoader()));
     }
 
-    private Optional<SystemTable> getRawSystemTable(SchemaTableName tableName)
+    private Optional<SystemTable> getRawSystemTable(SchemaTableName tableName, ConnectorSession session)
     {
         HudiTableName name = HudiTableName.from(tableName.getTableName());
         if (name.getTableType() == TableType.DATA) {
@@ -139,14 +136,18 @@ public class HudiMetadata
         if (tableOptional.isEmpty()) {
             return Optional.empty();
         }
-        switch (name.getTableType()) {
-            case DATA:
-                break;
-            case TIMELINE:
-                SchemaTableName systemTableName = new SchemaTableName(tableName.getSchemaName(), name.getTableNameWithType());
-                return Optional.of(new TimelineTable(hdfsEnvironment, systemTableName, tableOptional.get()));
+        if (!isHudiTable(tableOptional.get())) {
+            return Optional.empty();
         }
-        return Optional.empty();
+        return switch (name.getTableType()) {
+            case DATA ->
+                // TODO (https://github.com/trinodb/trino/issues/17973) remove DATA table type
+                    Optional.empty();
+            case TIMELINE -> {
+                SchemaTableName systemTableName = new SchemaTableName(tableName.getSchemaName(), name.getTableNameWithType());
+                yield Optional.of(new TimelineTable(fileSystemFactory.create(session), systemTableName, tableOptional.get()));
+            }
+        };
     }
 
     @Override
@@ -225,31 +226,6 @@ public class HudiMetadata
     HiveMetastore getMetastore()
     {
         return metastore;
-    }
-
-    private boolean isHudiTable(ConnectorSession session, Table table)
-    {
-        String basePath = table.getStorage().getLocation();
-        try {
-            Location baseLocation = Location.of(basePath);
-            Location metaLocation = baseLocation.appendPath(METAFOLDER_NAME);
-
-            TrinoFileSystem trinoFileSystem = fileSystemFactory.create(session);
-            FileIterator iterator = trinoFileSystem.listFiles(metaLocation);
-            // If there is at least one file in the .hoodie directory, it's a valid Hudi table
-            if (!iterator.hasNext()) {
-                log.warn("Could not find Hudi table at path '%s'.", basePath);
-                return false;
-            }
-        }
-        catch (IllegalArgumentException e) {
-            log.warn("Could not find Hudi table at path '%s'. Error: %s", basePath, e.getMessage());
-            return false;
-        }
-        catch (IOException e) {
-            throw new TrinoException(HUDI_FILESYSTEM_ERROR, format("Could not check if %s is a valid table", basePath), e);
-        }
-        return true;
     }
 
     private Optional<TableColumnsMetadata> getTableColumnMetadata(ConnectorSession session, SchemaTableName table)

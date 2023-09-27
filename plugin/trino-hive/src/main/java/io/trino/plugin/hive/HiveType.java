@@ -35,15 +35,15 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.lenientFormat;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.slice.SizeOf.instanceSize;
+import static io.trino.hive.formats.UnionToRowCoercionUtils.UNION_FIELD_FIELD_PREFIX;
+import static io.trino.hive.formats.UnionToRowCoercionUtils.UNION_FIELD_TAG_NAME;
+import static io.trino.hive.formats.UnionToRowCoercionUtils.UNION_FIELD_TAG_TYPE;
 import static io.trino.plugin.hive.HiveStorageFormat.AVRO;
 import static io.trino.plugin.hive.HiveStorageFormat.ORC;
 import static io.trino.plugin.hive.HiveTimestampPrecision.DEFAULT_PRECISION;
 import static io.trino.plugin.hive.type.TypeInfoFactory.getPrimitiveTypeInfo;
 import static io.trino.plugin.hive.type.TypeInfoUtils.getTypeInfoFromTypeString;
 import static io.trino.plugin.hive.type.TypeInfoUtils.getTypeInfosFromTypeString;
-import static io.trino.plugin.hive.util.HiveTypeTranslator.UNION_FIELD_FIELD_PREFIX;
-import static io.trino.plugin.hive.util.HiveTypeTranslator.UNION_FIELD_TAG_NAME;
-import static io.trino.plugin.hive.util.HiveTypeTranslator.UNION_FIELD_TAG_TYPE;
 import static io.trino.plugin.hive.util.HiveTypeTranslator.toTypeInfo;
 import static io.trino.plugin.hive.util.HiveTypeTranslator.toTypeSignature;
 import static io.trino.plugin.hive.util.SerdeConstants.BIGINT_TYPE_NAME;
@@ -55,6 +55,7 @@ import static io.trino.plugin.hive.util.SerdeConstants.FLOAT_TYPE_NAME;
 import static io.trino.plugin.hive.util.SerdeConstants.INT_TYPE_NAME;
 import static io.trino.plugin.hive.util.SerdeConstants.SMALLINT_TYPE_NAME;
 import static io.trino.plugin.hive.util.SerdeConstants.STRING_TYPE_NAME;
+import static io.trino.plugin.hive.util.SerdeConstants.TIMESTAMPLOCALTZ_TYPE_NAME;
 import static io.trino.plugin.hive.util.SerdeConstants.TIMESTAMP_TYPE_NAME;
 import static io.trino.plugin.hive.util.SerdeConstants.TINYINT_TYPE_NAME;
 import static java.util.Objects.requireNonNull;
@@ -72,6 +73,7 @@ public final class HiveType
     public static final HiveType HIVE_DOUBLE = new HiveType(getPrimitiveTypeInfo(DOUBLE_TYPE_NAME));
     public static final HiveType HIVE_STRING = new HiveType(getPrimitiveTypeInfo(STRING_TYPE_NAME));
     public static final HiveType HIVE_TIMESTAMP = new HiveType(getPrimitiveTypeInfo(TIMESTAMP_TYPE_NAME));
+    public static final HiveType HIVE_TIMESTAMPLOCALTZ = new HiveType(getPrimitiveTypeInfo(TIMESTAMPLOCALTZ_TYPE_NAME));
     public static final HiveType HIVE_DATE = new HiveType(getPrimitiveTypeInfo(DATE_TYPE_NAME));
     public static final HiveType HIVE_BINARY = new HiveType(getPrimitiveTypeInfo(BINARY_TYPE_NAME));
 
@@ -197,10 +199,10 @@ public final class HiveType
                     CHAR,
                     DATE,
                     TIMESTAMP,
+                    TIMESTAMPLOCALTZ,
                     BINARY,
                     DECIMAL -> true;
-            case TIMESTAMPLOCALTZ,
-                    INTERVAL_YEAR_MONTH,
+            case INTERVAL_YEAR_MONTH,
                     INTERVAL_DAY_TIME,
                     VOID,
                     UNKNOWN -> false;
@@ -249,7 +251,7 @@ public final class HiveType
             else if (typeInfo instanceof UnionTypeInfo unionTypeInfo) {
                 try {
                     if (fieldIndex == 0) {
-                        //  union's tag field, defined in {@link io.trino.plugin.hive.util.HiveTypeTranslator#toTypeSignature}
+                        //  union's tag field, defined in {@link io.trino.hive.formats.UnionToRowCoercionUtils}
                         return Optional.of(toHiveType(UNION_FIELD_TAG_TYPE));
                     }
                     else {
@@ -308,7 +310,6 @@ public final class HiveType
 
     public long getRetainedSizeInBytes()
     {
-        // typeInfo is not accounted for as the instances are cached (by TypeInfoFactory) and shared
-        return INSTANCE_SIZE + hiveTypeName.getEstimatedSizeInBytes();
+        return INSTANCE_SIZE + hiveTypeName.getEstimatedSizeInBytes() + typeInfo.getRetainedSizeInBytes();
     }
 }

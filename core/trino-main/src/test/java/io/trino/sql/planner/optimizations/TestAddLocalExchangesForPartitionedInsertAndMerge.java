@@ -30,7 +30,7 @@ import io.trino.sql.planner.assertions.BasePlanTest;
 import io.trino.sql.planner.plan.TableScanNode;
 import io.trino.testing.LocalQueryRunner;
 import org.intellij.lang.annotations.Language;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
@@ -45,7 +45,6 @@ import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.exchange;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.mergeWriter;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.node;
-import static io.trino.sql.planner.assertions.PlanMatchPattern.project;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.tableWriter;
 import static io.trino.sql.planner.plan.ExchangeNode.Scope.LOCAL;
@@ -86,7 +85,6 @@ public class TestAddLocalExchangesForPartitionedInsertAndMerge
     private MockConnectorFactory createMergeConnectorFactory()
     {
         return MockConnectorFactory.builder()
-                .withSupportsReportingWrittenBytes(true)
                 .withGetTableHandle(((session, schemaTableName) -> {
                     if (schemaTableName.getTableName().equals("source_table")) {
                         return new MockConnectorTableHandle(schemaTableName);
@@ -163,10 +161,8 @@ public class TestAddLocalExchangesForPartitionedInsertAndMerge
                                 ImmutableList.of("customer", "year"),
                                 ImmutableList.of("customer", "year"),
                                 exchange(LOCAL, GATHER, SINGLE_DISTRIBUTION,
-                                        project(
-                                                exchange(REMOTE, REPARTITION, FIXED_HASH_DISTRIBUTION,
-                                                        anyTree(
-                                                                tableScan("source_table", ImmutableMap.of("customer", "customer", "year", "year")))))))));
+                                        exchange(REMOTE, REPARTITION, FIXED_HASH_DISTRIBUTION,
+                                                tableScan("source_table", ImmutableMap.of("customer", "customer", "year", "year")))))));
 
         assertDistributedPlan(
                 query,
@@ -178,10 +174,8 @@ public class TestAddLocalExchangesForPartitionedInsertAndMerge
                         tableWriter(
                                 ImmutableList.of("customer", "year"),
                                 ImmutableList.of("customer", "year"),
-                                project(
-                                        exchange(LOCAL, REPARTITION, FIXED_HASH_DISTRIBUTION,
-                                                exchange(REMOTE, REPARTITION, FIXED_HASH_DISTRIBUTION,
-                                                        anyTree(
-                                                                tableScan("source_table", ImmutableMap.of("customer", "customer", "year", "year")))))))));
+                                exchange(LOCAL, REPARTITION, FIXED_HASH_DISTRIBUTION,
+                                        exchange(REMOTE, REPARTITION, FIXED_HASH_DISTRIBUTION,
+                                                tableScan("source_table", ImmutableMap.of("customer", "customer", "year", "year")))))));
     }
 }

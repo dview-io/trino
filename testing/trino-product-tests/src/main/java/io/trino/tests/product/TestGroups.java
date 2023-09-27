@@ -28,6 +28,7 @@ public final class TestGroups
     public static final String BLACKHOLE_CONNECTOR = "blackhole";
     public static final String SMOKE = "smoke";
     public static final String JDBC = "jdbc";
+    public static final String JDBC_KERBEROS_CONSTRAINED_DELEGATION = "jdbc_kerberos_constrained_delegation";
     public static final String OAUTH2 = "oauth2";
     public static final String OAUTH2_REFRESH = "oauth2_refresh";
     public static final String MYSQL = "mysql";
@@ -69,6 +70,7 @@ public final class TestGroups
     public static final String CANCEL_QUERY = "cancel_query";
     public static final String LARGE_QUERY = "large_query";
     public static final String KAFKA = "kafka";
+    public static final String KAFKA_CONFLUENT_LICENSE = "kafka_confluent_license";
     public static final String TWO_HIVES = "two_hives";
     public static final String ICEBERG = "iceberg";
     public static final String ICEBERG_FORMAT_VERSION_COMPATIBILITY = "iceberg_format_version_compatibility";
@@ -85,11 +87,11 @@ public final class TestGroups
     public static final String DELTA_LAKE_MINIO = "delta-lake-minio";
     public static final String DELTA_LAKE_GCS = "delta-lake-gcs";
     public static final String DELTA_LAKE_DATABRICKS = "delta-lake-databricks";
-    public static final String DELTA_LAKE_EXCLUDE_73 = "delta-lake-exclude-73";
+    public static final String DELTA_LAKE_DATABRICKS_104 = "delta-lake-databricks-104";
+    public static final String DELTA_LAKE_DATABRICKS_113 = "delta-lake-databricks-113";
+    public static final String DELTA_LAKE_DATABRICKS_122 = "delta-lake-databricks-122";
     public static final String DELTA_LAKE_EXCLUDE_91 = "delta-lake-exclude-91";
-    public static final String DELTA_LAKE_EXCLUDE_104 = "delta-lake-exclude-104";
-    public static final String DELTA_LAKE_EXCLUDE_113 = "delta-lake-exclude-113";
-    public static final String DELTA_LAKE_EXCLUDE_122 = "delta-lake-exclude-122";
+    public static final String DELTA_LAKE_EXCLUDE_133 = "delta-lake-exclude-133";
     public static final String HUDI = "hudi";
     public static final String PARQUET = "parquet";
     public static final String IGNITE = "ignite";

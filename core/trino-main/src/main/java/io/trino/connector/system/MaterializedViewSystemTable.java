@@ -13,6 +13,7 @@
  */
 package io.trino.connector.system;
 
+import com.google.inject.Inject;
 import io.trino.FullConnectorSession;
 import io.trino.Session;
 import io.trino.metadata.Metadata;
@@ -32,8 +33,6 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SystemTable;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.LongTimestampWithTimeZone;
-
-import javax.inject.Inject;
 
 import java.util.Optional;
 
@@ -104,24 +103,29 @@ public class MaterializedViewSystemTable
         listCatalogNames(session, metadata, accessControl, catalogFilter).forEach(catalogName -> {
             QualifiedTablePrefix tablePrefix = tablePrefix(catalogName, schemaFilter, tableFilter);
 
-            getMaterializedViews(session, metadata, accessControl, tablePrefix).forEach((tableName, definition) -> {
-                QualifiedObjectName name = new QualifiedObjectName(tablePrefix.getCatalogName(), tableName.getSchemaName(), tableName.getTableName());
-                MaterializedViewFreshness freshness;
-
-                try {
-                    freshness = metadata.getMaterializedViewFreshness(session, name);
-                }
-                catch (MaterializedViewNotFoundException e) {
-                    // Ignore materialized view that was dropped during query execution (race condition)
-                    return;
-                }
-
-                Object[] materializedViewRow = createMaterializedViewRow(name, freshness, definition);
-                displayTable.addRow(materializedViewRow);
-            });
+            addMaterializedViewForCatalog(session, displayTable, tablePrefix);
         });
 
         return displayTable.build().cursor();
+    }
+
+    private void addMaterializedViewForCatalog(Session session, InMemoryRecordSet.Builder displayTable, QualifiedTablePrefix tablePrefix)
+    {
+        getMaterializedViews(session, metadata, accessControl, tablePrefix).forEach((tableName, definition) -> {
+            QualifiedObjectName name = new QualifiedObjectName(tablePrefix.getCatalogName(), tableName.getSchemaName(), tableName.getTableName());
+            MaterializedViewFreshness freshness;
+
+            try {
+                freshness = metadata.getMaterializedViewFreshness(session, name);
+            }
+            catch (MaterializedViewNotFoundException e) {
+                // Ignore materialized view that was dropped during query execution (race condition)
+                return;
+            }
+
+            Object[] materializedViewRow = createMaterializedViewRow(name, freshness, definition);
+            displayTable.addRow(materializedViewRow);
+        });
     }
 
     private static Object[] createMaterializedViewRow(

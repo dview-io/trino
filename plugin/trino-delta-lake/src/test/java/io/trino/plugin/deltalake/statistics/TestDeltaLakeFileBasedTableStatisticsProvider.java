@@ -20,6 +20,7 @@ import io.trino.plugin.deltalake.DeltaLakeColumnHandle;
 import io.trino.plugin.deltalake.DeltaLakeConfig;
 import io.trino.plugin.deltalake.DeltaLakeTableHandle;
 import io.trino.plugin.deltalake.transactionlog.MetadataEntry;
+import io.trino.plugin.deltalake.transactionlog.ProtocolEntry;
 import io.trino.plugin.deltalake.transactionlog.TableSnapshot;
 import io.trino.plugin.deltalake.transactionlog.TransactionLogAccess;
 import io.trino.plugin.deltalake.transactionlog.checkpoint.CheckpointSchemaManager;
@@ -105,18 +106,20 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
         SchemaTableName schemaTableName = new SchemaTableName("db_name", tableName);
         TableSnapshot tableSnapshot;
         try {
-            tableSnapshot = transactionLogAccess.loadSnapshot(schemaTableName, tableLocation, SESSION);
+            tableSnapshot = transactionLogAccess.getSnapshot(SESSION, schemaTableName, tableLocation, Optional.empty());
         }
         catch (IOException e) {
             throw new RuntimeException(e);
         }
         MetadataEntry metadataEntry = transactionLogAccess.getMetadataEntry(tableSnapshot, SESSION);
+        transactionLogAccess.cleanupQuery(SESSION);
         return new DeltaLakeTableHandle(
                 schemaTableName.getSchemaName(),
                 schemaTableName.getTableName(),
                 false,
                 tableLocation,
                 metadataEntry,
+                new ProtocolEntry(1, 2, Optional.empty(), Optional.empty()),
                 TupleDomain.all(),
                 TupleDomain.all(),
                 Optional.empty(),
@@ -247,6 +250,7 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
                 tableHandle.isManaged(),
                 tableHandle.getLocation(),
                 tableHandle.getMetadataEntry(),
+                tableHandle.getProtocolEntry(),
                 TupleDomain.all(),
                 TupleDomain.withColumnDomains(ImmutableMap.of((DeltaLakeColumnHandle) COLUMN_HANDLE, Domain.singleValue(DOUBLE, 42.0))),
                 tableHandle.getWriteType(),
@@ -271,6 +275,7 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
                 tableHandle.isManaged(),
                 tableHandle.getLocation(),
                 tableHandle.getMetadataEntry(),
+                tableHandle.getProtocolEntry(),
                 TupleDomain.none(),
                 TupleDomain.all(),
                 tableHandle.getWriteType(),
@@ -285,6 +290,7 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
                 tableHandle.isManaged(),
                 tableHandle.getLocation(),
                 tableHandle.getMetadataEntry(),
+                tableHandle.getProtocolEntry(),
                 TupleDomain.all(),
                 TupleDomain.none(),
                 tableHandle.getWriteType(),
@@ -398,8 +404,7 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
     public void testExtendedStatisticsWithoutDataSize()
     {
         // Read extended_stats.json that was generated before supporting data_size
-        String tableLocation = Resources.getResource("statistics/extended_stats_without_data_size").toExternalForm();
-        Optional<ExtendedStatistics> extendedStatistics = statistics.readExtendedStatistics(SESSION, tableLocation);
+        Optional<ExtendedStatistics> extendedStatistics = readExtendedStatisticsFromTableResource("statistics/extended_stats_without_data_size");
         assertThat(extendedStatistics).isNotEmpty();
         Map<String, DeltaLakeColumnStatistics> columnStatistics = extendedStatistics.get().getColumnStatistics();
         assertThat(columnStatistics).hasSize(3);
@@ -409,8 +414,7 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
     public void testExtendedStatisticsWithDataSize()
     {
         // Read extended_stats.json that was generated after supporting data_size
-        String tableLocation = Resources.getResource("statistics/extended_stats_with_data_size").toExternalForm();
-        Optional<ExtendedStatistics> extendedStatistics = statistics.readExtendedStatistics(SESSION, tableLocation);
+        Optional<ExtendedStatistics> extendedStatistics = readExtendedStatisticsFromTableResource("statistics/extended_stats_with_data_size");
         assertThat(extendedStatistics).isNotEmpty();
         Map<String, DeltaLakeColumnStatistics> columnStatistics = extendedStatistics.get().getColumnStatistics();
         assertThat(columnStatistics).hasSize(3);
@@ -423,8 +427,8 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
     public void testMergeExtendedStatisticsWithoutAndWithDataSize()
     {
         // Merge two extended stats files. The first file doesn't have totalSizeInBytes field and the second file has totalSizeInBytes field
-        Optional<ExtendedStatistics> statisticsWithoutDataSize = statistics.readExtendedStatistics(SESSION, Resources.getResource("statistics/extended_stats_without_data_size").toExternalForm());
-        Optional<ExtendedStatistics> statisticsWithDataSize = statistics.readExtendedStatistics(SESSION, Resources.getResource("statistics/extended_stats_with_data_size").toExternalForm());
+        Optional<ExtendedStatistics> statisticsWithoutDataSize = readExtendedStatisticsFromTableResource("statistics/extended_stats_without_data_size");
+        Optional<ExtendedStatistics> statisticsWithDataSize = readExtendedStatisticsFromTableResource("statistics/extended_stats_with_data_size");
         assertThat(statisticsWithoutDataSize).isNotEmpty();
         assertThat(statisticsWithDataSize).isNotEmpty();
 
@@ -448,11 +452,20 @@ public class TestDeltaLakeFileBasedTableStatisticsProvider
     {
         TableSnapshot tableSnapshot;
         try {
-            tableSnapshot = transactionLogAccess.loadSnapshot(tableHandle.getSchemaTableName(), tableHandle.getLocation(), SESSION);
+            tableSnapshot = transactionLogAccess.getSnapshot(SESSION, tableHandle.getSchemaTableName(), tableHandle.getLocation(), Optional.empty());
         }
         catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return tableStatisticsProvider.getTableStatistics(session, tableHandle, tableSnapshot);
+        TableStatistics tableStatistics = tableStatisticsProvider.getTableStatistics(session, tableHandle, tableSnapshot);
+        transactionLogAccess.cleanupQuery(SESSION);
+        return tableStatistics;
+    }
+
+    private Optional<ExtendedStatistics> readExtendedStatisticsFromTableResource(String tableLocationResourceName)
+    {
+        SchemaTableName name = new SchemaTableName("some_ignored_schema", "some_ignored_name");
+        String tableLocation = Resources.getResource(tableLocationResourceName).toExternalForm();
+        return statistics.readExtendedStatistics(SESSION, name, tableLocation);
     }
 }

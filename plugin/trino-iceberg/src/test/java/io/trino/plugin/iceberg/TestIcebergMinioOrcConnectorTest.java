@@ -14,25 +14,11 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import io.trino.Session;
 import io.trino.filesystem.Location;
-import io.trino.filesystem.TrinoFileSystem;
-import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
-import io.trino.hdfs.ConfigurationInitializer;
-import io.trino.hdfs.DynamicHdfsConfiguration;
-import io.trino.hdfs.HdfsConfig;
-import io.trino.hdfs.HdfsConfiguration;
-import io.trino.hdfs.HdfsConfigurationInitializer;
-import io.trino.hdfs.HdfsEnvironment;
-import io.trino.hdfs.TrinoHdfsFileSystemStats;
-import io.trino.hdfs.authentication.NoHdfsAuthentication;
-import io.trino.hdfs.s3.HiveS3Config;
-import io.trino.hdfs.s3.TrinoS3ConfigurationInitializer;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.containers.Minio;
 import io.trino.testing.sql.TestTable;
-import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.io.File;
@@ -45,9 +31,9 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.io.Resources.getResource;
 import static io.trino.plugin.iceberg.IcebergFileFormat.ORC;
 import static io.trino.plugin.iceberg.IcebergTestUtils.checkOrcFileSorting;
-import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.testing.containers.Minio.MINIO_ACCESS_KEY;
+import static io.trino.testing.containers.Minio.MINIO_REGION;
 import static io.trino.testing.containers.Minio.MINIO_SECRET_KEY;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,11 +64,14 @@ public class TestIcebergMinioOrcConnectorTest
                 .setIcebergProperties(
                         ImmutableMap.<String, String>builder()
                                 .put("iceberg.file-format", format.name())
-                                .put("hive.s3.aws-access-key", MINIO_ACCESS_KEY)
-                                .put("hive.s3.aws-secret-key", MINIO_SECRET_KEY)
-                                .put("hive.s3.endpoint", minio.getMinioAddress())
-                                .put("hive.s3.path-style-access", "true")
-                                .put("hive.s3.streaming.part-size", "5MB") // minimize memory usage
+                                .put("fs.native-s3.enabled", "true")
+                                .put("s3.aws-access-key", MINIO_ACCESS_KEY)
+                                .put("s3.aws-secret-key", MINIO_SECRET_KEY)
+                                .put("s3.region", MINIO_REGION)
+                                .put("s3.endpoint", minio.getMinioAddress())
+                                .put("s3.path-style-access", "true")
+                                .put("s3.streaming.part-size", "5MB") // minimize memory usage
+                                .put("s3.max-connections", "2") // verify no leaks
                                 .put("iceberg.register-table-procedure.enabled", "true")
                                 // Allows testing the sorting writer flushing to the file system with smaller tables
                                 .put("iceberg.writer-sort-buffer-size", "1MB")
@@ -94,18 +83,6 @@ public class TestIcebergMinioOrcConnectorTest
                                 .withSchemaProperties(Map.of("location", "'s3://" + bucketName + "/iceberg_data/tpch'"))
                                 .build())
                 .build();
-    }
-
-    @Override
-    @BeforeClass
-    public void initFileSystemFactory()
-    {
-        ConfigurationInitializer s3Config = new TrinoS3ConfigurationInitializer(new HiveS3Config()
-                .setS3AwsAccessKey(MINIO_ACCESS_KEY)
-                .setS3AwsSecretKey(MINIO_SECRET_KEY));
-        HdfsConfigurationInitializer initializer = new HdfsConfigurationInitializer(new HdfsConfig(), ImmutableSet.of(s3Config));
-        HdfsConfiguration hdfsConfiguration = new DynamicHdfsConfiguration(initializer, ImmutableSet.of());
-        this.fileSystemFactory = new HdfsFileSystemFactory(new HdfsEnvironment(hdfsConfiguration, new HdfsConfig(), new NoHdfsAuthentication()), new TrinoHdfsFileSystemStats());
     }
 
     @Override
@@ -124,7 +101,7 @@ public class TestIcebergMinioOrcConnectorTest
     @Override
     protected boolean isFileSorted(String path, String sortColumnName)
     {
-        return checkOrcFileSorting(fileSystemFactory, Location.of(path), sortColumnName);
+        return checkOrcFileSorting(fileSystem, Location.of(path), sortColumnName);
     }
 
     @Test
@@ -147,7 +124,6 @@ public class TestIcebergMinioOrcConnectorTest
         checkArgument(expectedValue != 0);
         try (TestTable table = new TestTable(getQueryRunner()::execute, "test_read_as_integer", "(\"_col0\") AS VALUES 0, NULL")) {
             String orcFilePath = (String) computeScalar(format("SELECT DISTINCT file_path FROM \"%s$files\"", table.getName()));
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
             try (OutputStream outputStream = fileSystem.newOutputFile(Location.of(orcFilePath)).createOrOverwrite()) {
                 Files.copy(new File(getResource(orcFileResourceName).toURI()).toPath(), outputStream);
             }
@@ -159,6 +135,23 @@ public class TestIcebergMinioOrcConnectorTest
                     .build();
             assertThat(query(ignoreFileSizeFromMetadata, "TABLE " + table.getName()))
                     .matches("VALUES NULL, " + expectedValue);
+        }
+    }
+
+    @Test
+    public void testTimeType()
+    {
+        // Regression test for https://github.com/trinodb/trino/issues/15603
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_time", "(col time(6))")) {
+            assertUpdate("INSERT INTO " + table.getName() + " VALUES (TIME '13:30:00'), (TIME '14:30:00'), (NULL)", 3);
+            assertQuery("SELECT * FROM " + table.getName(), "VALUES '13:30:00', '14:30:00', NULL");
+            assertQuery(
+                    "SHOW STATS FOR " + table.getName(),
+                    """
+                            VALUES
+                            ('col', null, 2.0, 0.33333333333, null, null, null),
+                            (null, null, null, null, 3, null, null)
+                            """);
         }
     }
 

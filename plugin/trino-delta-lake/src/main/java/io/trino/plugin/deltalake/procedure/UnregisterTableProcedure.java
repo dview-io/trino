@@ -14,6 +14,8 @@
 package io.trino.plugin.deltalake.procedure;
 
 import com.google.common.collect.ImmutableList;
+import com.google.inject.Inject;
+import com.google.inject.Provider;
 import io.trino.plugin.deltalake.DeltaLakeMetadata;
 import io.trino.plugin.deltalake.DeltaLakeMetadataFactory;
 import io.trino.plugin.deltalake.LocatedTableHandle;
@@ -26,10 +28,8 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.procedure.Procedure;
 
-import javax.inject.Inject;
-import javax.inject.Provider;
-
 import java.lang.invoke.MethodHandle;
+import java.util.Optional;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static io.trino.plugin.base.util.Procedures.checkProcedureArgument;
@@ -103,7 +103,7 @@ public class UnregisterTableProcedure
         }
         metadata.getMetastore().dropTable(session, schemaTableName, tableHandle.location(), false);
         // As a precaution, clear the caches
-        statisticsAccess.invalidateCache(tableHandle.location());
-        transactionLogAccess.invalidateCaches(tableHandle.location());
+        statisticsAccess.invalidateCache(schemaTableName, Optional.of(tableHandle.location()));
+        transactionLogAccess.invalidateCache(schemaTableName, Optional.of(tableHandle.location()));
     }
 }

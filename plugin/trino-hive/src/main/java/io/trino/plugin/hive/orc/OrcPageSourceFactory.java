@@ -16,6 +16,7 @@ package io.trino.plugin.hive.orc;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
+import com.google.inject.Inject;
 import io.airlift.slice.Slice;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
@@ -52,10 +53,7 @@ import io.trino.spi.connector.EmptyPageSource;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Type;
-import org.apache.hadoop.conf.Configuration;
 import org.joda.time.DateTimeZone;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -91,7 +89,6 @@ import static io.trino.plugin.hive.HiveSessionProperties.getOrcMaxMergeDistance;
 import static io.trino.plugin.hive.HiveSessionProperties.getOrcMaxReadBlockSize;
 import static io.trino.plugin.hive.HiveSessionProperties.getOrcStreamBufferSize;
 import static io.trino.plugin.hive.HiveSessionProperties.getOrcTinyStripeThreshold;
-import static io.trino.plugin.hive.HiveSessionProperties.getTimestampPrecision;
 import static io.trino.plugin.hive.HiveSessionProperties.isOrcBloomFiltersEnabled;
 import static io.trino.plugin.hive.HiveSessionProperties.isOrcNestedLazy;
 import static io.trino.plugin.hive.HiveSessionProperties.isUseOrcColumnNames;
@@ -101,6 +98,7 @@ import static io.trino.plugin.hive.orc.OrcTypeTranslator.createCoercer;
 import static io.trino.plugin.hive.util.AcidTables.isFullAcidTable;
 import static io.trino.plugin.hive.util.HiveClassNames.ORC_SERDE_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.getDeserializerClassName;
+import static io.trino.plugin.hive.util.HiveUtil.splitError;
 import static io.trino.plugin.hive.util.SerdeConstants.SERIALIZATION_LIB;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -174,7 +172,6 @@ public class OrcPageSourceFactory
 
     @Override
     public Optional<ReaderPageSource> createPageSource(
-            Configuration configuration,
             ConnectorSession session,
             Location path,
             long start,
@@ -366,7 +363,7 @@ public class OrcPageSourceFactory
                 Type readType = column.getType();
                 if (orcColumn != null) {
                     int sourceIndex = fileReadColumns.size();
-                    Optional<TypeCoercer<?, ?>> coercer = createCoercer(orcColumn.getColumnType(), readType, getTimestampPrecision(session));
+                    Optional<TypeCoercer<?, ?>> coercer = createCoercer(orcColumn.getColumnType(), readType);
                     if (coercer.isPresent()) {
                         fileReadTypes.add(coercer.get().getFromType());
                         columnAdaptations.add(ColumnAdaptation.coercedColumn(sourceIndex, coercer.get()));
@@ -539,11 +536,6 @@ public class OrcPageSourceFactory
     private static boolean hasOriginalFiles(AcidInfo acidInfo)
     {
         return !acidInfo.getOriginalFiles().isEmpty();
-    }
-
-    private static String splitError(Throwable t, Location path, long start, long length)
-    {
-        return format("Error opening Hive split %s (offset=%s, length=%s): %s", path, start, length, t.getMessage());
     }
 
     private static void verifyFileHasColumnNames(List<OrcColumn> columns, Location path)

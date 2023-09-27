@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.testing.TestingTicker;
 import io.airlift.units.Duration;
+import io.opentelemetry.api.OpenTelemetry;
 import io.trino.Session;
 import io.trino.client.FailureInfo;
 import io.trino.client.NodeVersion;
@@ -28,6 +29,7 @@ import io.trino.plugin.base.security.DefaultSystemAccessControl;
 import io.trino.security.AccessControlConfig;
 import io.trino.security.AccessControlManager;
 import io.trino.spi.TrinoException;
+import io.trino.spi.connector.CatalogHandle.CatalogVersion;
 import io.trino.spi.resourcegroups.QueryType;
 import io.trino.spi.resourcegroups.ResourceGroupId;
 import io.trino.spi.type.Type;
@@ -82,6 +84,7 @@ public class TestQueryStateMachine
     private static final URI LOCATION = URI.create("fake://fake-query");
     private static final List<Input> INPUTS = ImmutableList.of(new Input(
             "connector",
+            new CatalogVersion("default"),
             "schema",
             "table",
             Optional.empty(),
@@ -520,6 +523,7 @@ public class TestQueryStateMachine
                 transactionManager,
                 emptyEventListenerManager(),
                 new AccessControlConfig(),
+                OpenTelemetry.noop(),
                 DefaultSystemAccessControl.NAME);
         accessControl.setSystemAccessControls(List.of(AllowAllSystemAccessControl.INSTANCE));
         QueryStateMachine stateMachine = QueryStateMachine.beginWithTicker(

@@ -17,33 +17,33 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
-import io.trino.tempto.BeforeTestWithContext;
+import io.trino.tempto.BeforeMethodWithContext;
 import io.trino.tempto.assertions.QueryAssert;
 import io.trino.tempto.query.QueryResult;
 import io.trino.testng.services.Flaky;
 import org.testng.annotations.Test;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.List;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
-import static io.trino.tempto.assertions.QueryAssert.assertThat;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS;
-import static io.trino.tests.product.TestGroups.DELTA_LAKE_EXCLUDE_113;
-import static io.trino.tests.product.TestGroups.DELTA_LAKE_EXCLUDE_122;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_104;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_113;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_DATABRICKS_122;
+import static io.trino.tests.product.TestGroups.DELTA_LAKE_EXCLUDE_133;
 import static io.trino.tests.product.TestGroups.PROFILE_SPECIFIC_TESTS;
 import static io.trino.tests.product.deltalake.TransactionLogAssertions.assertLastEntryIsCheckpointed;
 import static io.trino.tests.product.deltalake.TransactionLogAssertions.assertTransactionLogVersion;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_ISSUE;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_MATCH;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.dropDeltaTableWithRetry;
-import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.removeS3Directory;
 import static io.trino.tests.product.utils.QueryExecutors.onDelta;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestDeltaLakeDatabricksCreateTableAsSelectCompatibility
         extends BaseTestDeltaLakeS3Storage
@@ -54,14 +54,14 @@ public class TestDeltaLakeDatabricksCreateTableAsSelectCompatibility
 
     private AmazonS3 s3;
 
-    @BeforeTestWithContext
+    @BeforeMethodWithContext
     public void setup()
     {
         super.setUp();
         s3 = new S3ClientFactory().createS3Client(s3ServerType);
     }
 
-    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_DATABRICKS_104, DELTA_LAKE_DATABRICKS_113, DELTA_LAKE_DATABRICKS_122, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testPrestoTypesWithDatabricks()
     {
@@ -109,56 +109,6 @@ public class TestDeltaLakeDatabricksCreateTableAsSelectCompatibility
 
             QueryResult databricksResult = onDelta().executeQuery("SELECT id, date_format(timestamp_in_utc, \"yyyy-MM-dd HH:mm:ss.SSS\"), date_format(timestamp_in_new_york, \"yyyy-MM-dd HH:mm:ss.SSS\"), date_format(timestamp_in_warsaw, \"yyyy-MM-dd HH:mm:ss.SSS\") FROM default." + tableName);
             QueryResult prestoResult = onTrino().executeQuery("SELECT id, format('%1$tF %1$tT.%1$tL', timestamp_in_utc), format('%1$tF %1$tT.%1$tL', timestamp_in_new_york), format('%1$tF %1$tT.%1$tL', timestamp_in_warsaw) FROM delta.default.\"" + tableName + "\"");
-            assertThat(databricksResult).containsOnly(prestoResult.rows().stream()
-                    .map(QueryAssert.Row::new)
-                    .collect(toImmutableList()));
-        }
-        finally {
-            dropDeltaTableWithRetry("default." + tableName);
-        }
-    }
-
-    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
-    @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
-    public void testPrestoCacheInvalidatedOnCreateTable()
-            throws URISyntaxException, IOException
-    {
-        String tableName = "test_dl_ctas_caching_" + randomNameSuffix();
-
-        try {
-            assertThat(onTrino().executeQuery("CREATE TABLE delta.default.\"" + tableName + "\" " +
-                    "(id, boolean, tinyint) " +
-                    "WITH (location = 's3://" + bucketName + "/databricks-compatibility-test-" + tableName + "') AS VALUES " +
-                    "(1, BOOLEAN 'false', TINYINT '-128')" +
-                    ", (2, BOOLEAN 'true', TINYINT '127')" +
-                    ", (3, BOOLEAN 'false', TINYINT '0')" +
-                    ", (4, BOOLEAN 'false', TINYINT '1')" +
-                    ", (5, BOOLEAN 'true', TINYINT '37')"))
-                    .containsOnly(row(5));
-
-            QueryResult databricksResult = onDelta().executeQuery(format("SELECT * FROM default.%s", tableName));
-            QueryResult prestoResult = onTrino().executeQuery(format("SELECT * FROM delta.default.\"%s\"", tableName));
-            assertThat(databricksResult).containsOnly(prestoResult.rows().stream()
-                    .map(QueryAssert.Row::new)
-                    .collect(toImmutableList()));
-
-            dropDeltaTableWithRetry("default." + tableName);
-            removeS3Directory(s3, bucketName, "databricks-compatibility-test-" + tableName);
-
-            assertThat(onTrino().executeQuery("CREATE TABLE delta.default.\"" + tableName + "\" " +
-                    "(id, boolean, tinyint) " +
-                    "WITH (location = 's3://" + bucketName + "/databricks-compatibility-test-" + tableName + "') AS VALUES " +
-                    "(1, BOOLEAN 'true', TINYINT '1')" +
-                    ", (2, BOOLEAN 'true', TINYINT '1')" +
-                    ", (3, BOOLEAN 'false', TINYINT '2')" +
-                    ", (4, BOOLEAN 'true', TINYINT '3')" +
-                    ", (5, BOOLEAN 'true', TINYINT '5')" +
-                    ", (6, BOOLEAN 'false', TINYINT '8')" +
-                    ", (7, BOOLEAN 'true', TINYINT '13')"))
-                    .containsOnly(row(7));
-
-            databricksResult = onDelta().executeQuery(format("SELECT * FROM default.%s", tableName));
-            prestoResult = onTrino().executeQuery(format("SELECT * FROM delta.default.\"%s\"", tableName));
             assertThat(databricksResult).containsOnly(prestoResult.rows().stream()
                     .map(QueryAssert.Row::new)
                     .collect(toImmutableList()));
@@ -223,8 +173,8 @@ public class TestDeltaLakeDatabricksCreateTableAsSelectCompatibility
         }
     }
 
-    // Databricks 11.3 and 12.2 don't create a checkpoint file at 'CREATE OR REPLACE TABLE' statement
-    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_113, DELTA_LAKE_EXCLUDE_122, PROFILE_SPECIFIC_TESTS})
+    // Databricks 11.3, 12.2 and 13.3 don't create a checkpoint file at 'CREATE OR REPLACE TABLE' statement
+    @Test(groups = {DELTA_LAKE_DATABRICKS, DELTA_LAKE_EXCLUDE_133, PROFILE_SPECIFIC_TESTS})
     @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
     public void testReplaceTableWithSchemaChangeOnCheckpoint()
     {
@@ -249,6 +199,77 @@ public class TestDeltaLakeDatabricksCreateTableAsSelectCompatibility
         }
         finally {
             dropDeltaTableWithRetry(tableName);
+        }
+    }
+
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
+    @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
+    public void testCreateTableWithUnsupportedPartitionType()
+    {
+        String tableName = "test_dl_ctas_unsupported_column_types_" + randomNameSuffix();
+        String tableLocation = "s3://%s/databricks-compatibility-test-%s".formatted(bucketName, tableName);
+        try {
+            assertThatThrownBy(() -> onTrino().executeQuery("" +
+                    "CREATE TABLE delta.default." + tableName + " WITH (partitioned_by = ARRAY['part'], location = '" + tableLocation + "') AS SELECT 1 a, array[1] part"))
+                    .hasMessageContaining("Using array, map or row type on partitioned columns is unsupported");
+            assertThatThrownBy(() -> onTrino().executeQuery("" +
+                    "CREATE TABLE delta.default." + tableName + " WITH (partitioned_by = ARRAY['part'], location = '" + tableLocation + "') AS SELECT 1 a, map() part"))
+                    .hasMessageContaining("Using array, map or row type on partitioned columns is unsupported");
+            assertThatThrownBy(() -> onTrino().executeQuery("" +
+                    "CREATE TABLE delta.default." + tableName + " WITH (partitioned_by = ARRAY['part'], location = '" + tableLocation + "') AS SELECT 1 a, row(1) part"))
+                    .hasMessageContaining("Using array, map or row type on partitioned columns is unsupported");
+
+            assertThatThrownBy(() -> onDelta().executeQuery(
+                    "CREATE TABLE default." + tableName + " USING DELTA PARTITIONED BY (part) LOCATION '" + tableLocation + "' AS SELECT 1 a, array(1) part"))
+                    .hasMessageMatching("(?s).*(Cannot use .* for partition column|Using column part of type .* as a partition column is not supported).*");
+            assertThatThrownBy(() -> onDelta().executeQuery(
+                    "CREATE TABLE default." + tableName + " USING DELTA PARTITIONED BY (part) LOCATION '" + tableLocation + "' AS SELECT 1 a, map() part"))
+                    .hasMessageMatching("(?s).*(Cannot use .* for partition column|Using column part of type .* as a partition column is not supported).*");
+            assertThatThrownBy(() -> onDelta().executeQuery(
+                    "CREATE TABLE default." + tableName + " USING DELTA PARTITIONED BY (part) LOCATION '" + tableLocation + "' AS SELECT 1 a, named_struct('x', 1) part"))
+                    .hasMessageMatching("(?s).*(Cannot use .* for partition column|Using column part of type .* as a partition column is not supported).*");
+        }
+        finally {
+            dropDeltaTableWithRetry("default." + tableName);
+        }
+    }
+
+    @Test(groups = {DELTA_LAKE_DATABRICKS, PROFILE_SPECIFIC_TESTS})
+    @Flaky(issue = DATABRICKS_COMMUNICATION_FAILURE_ISSUE, match = DATABRICKS_COMMUNICATION_FAILURE_MATCH)
+    public void testCreateTableAsSelectWithAllPartitionColumns()
+    {
+        String tableName = "test_dl_ctas_with_all_partition_columns_" + randomNameSuffix();
+        String tableDirectory = "databricks-compatibility-test-" + tableName;
+
+        try {
+            assertThatThrownBy(() -> onTrino().executeQuery("" +
+                    "CREATE TABLE delta.default." + tableName + " " +
+                    "WITH (partitioned_by = ARRAY['part'], location = 's3://" + bucketName + "/" + tableDirectory + "')" +
+                    "AS SELECT 1 part"))
+                    .hasMessageContaining("Using all columns for partition columns is unsupported");
+            assertThatThrownBy(() -> onTrino().executeQuery("" +
+                    "CREATE TABLE delta.default." + tableName + " " +
+                    "WITH (partitioned_by = ARRAY['part', 'another_part'], location = 's3://" + bucketName + "/" + tableDirectory + "')" +
+                    "AS SELECT 1 part, 2 another_part"))
+                    .hasMessageContaining("Using all columns for partition columns is unsupported");
+
+            assertThatThrownBy(() -> onDelta().executeQuery("" +
+                    "CREATE TABLE default." + tableName + " " +
+                    "USING DELTA " +
+                    "PARTITIONED BY (part)" +
+                    "LOCATION 's3://" + bucketName + "/" + tableDirectory + "'" +
+                    "AS SELECT 1 part"))
+                    .hasMessageContaining("Cannot use all columns for partition columns");
+            assertThatThrownBy(() -> onDelta().executeQuery("" +
+                    "CREATE TABLE default." + tableName + " " +
+                    "USING DELTA " +
+                    "PARTITIONED BY (part, another_part)" +
+                    "LOCATION 's3://" + bucketName + "/" + tableDirectory + "'" +
+                    "SELECT 1 part, 2 another_part"))
+                    .hasMessageContaining("Cannot use all columns for partition columns");
+        }
+        finally {
+            dropDeltaTableWithRetry("default." + tableName);
         }
     }
 }

@@ -25,7 +25,6 @@ import io.trino.filesystem.TrinoInputFile;
 import io.trino.parquet.ParquetReaderOptions;
 import io.trino.parquet.writer.ParquetWriterOptions;
 import io.trino.plugin.hive.FileFormatDataSourceStats;
-import io.trino.plugin.hive.FileWriter;
 import io.trino.plugin.hive.ReaderPageSource;
 import io.trino.plugin.hive.parquet.ParquetFileWriter;
 import io.trino.plugin.hive.parquet.ParquetPageSourceFactory;
@@ -41,12 +40,11 @@ import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeOperators;
+import jakarta.annotation.Nullable;
 import org.apache.parquet.format.CompressionCodec;
 import org.joda.time.DateTimeZone;
 import org.roaringbitmap.longlong.LongBitmapDataProvider;
 import org.roaringbitmap.longlong.Roaring64Bitmap;
-
-import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -331,12 +329,11 @@ public class DeltaLakeMergeSink
             Location sourceLocation = Location.of(sourcePath);
             String sourceRelativePath = relativePath(tablePath, sourcePath);
 
-            Location targetLocation = sourceLocation.parentDirectory().appendPath(session.getQueryId() + "_" + randomUUID());
+            Location targetLocation = sourceLocation.sibling(session.getQueryId() + "_" + randomUUID());
             String targetRelativePath = relativePath(tablePath, targetLocation.toString());
-            FileWriter fileWriter = createParquetFileWriter(targetLocation, dataColumns);
+            ParquetFileWriter fileWriter = createParquetFileWriter(targetLocation, dataColumns);
 
             DeltaLakeWriter writer = new DeltaLakeWriter(
-                    fileSystem,
                     fileWriter,
                     rootTableLocation,
                     targetRelativePath,
@@ -355,7 +352,7 @@ public class DeltaLakeMergeSink
         }
     }
 
-    private FileWriter createParquetFileWriter(Location path, List<DeltaLakeColumnHandle> dataColumns)
+    private ParquetFileWriter createParquetFileWriter(Location path, List<DeltaLakeColumnHandle> dataColumns)
     {
         ParquetWriterOptions parquetWriterOptions = ParquetWriterOptions.builder()
                 .setMaxBlockSize(getParquetWriterBlockSize(session))
@@ -385,7 +382,6 @@ public class DeltaLakeMergeSink
                     IntStream.range(0, dataColumns.size()).toArray(),
                     compressionCodec,
                     trinoVersion,
-                    false,
                     Optional.empty(),
                     Optional.empty());
         }

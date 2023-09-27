@@ -14,37 +14,42 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
 import io.trino.Session;
 import io.trino.filesystem.FileIterator;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
-import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
 import io.trino.plugin.iceberg.fileio.ForwardingFileIo;
 import io.trino.testing.BaseConnectorSmokeTest;
 import io.trino.testing.TestingConnectorBehavior;
-import io.trino.testing.TestingConnectorSession;
 import io.trino.testing.sql.TestTable;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.io.FileIO;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
+import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static io.airlift.concurrent.MoreFutures.getFutureValue;
-import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
-import static io.trino.plugin.hive.HiveTestUtils.HDFS_FILE_SYSTEM_STATS;
+import static io.airlift.concurrent.MoreFutures.tryGetFutureValue;
+import static io.trino.plugin.iceberg.IcebergTestUtils.getFileSystemFactory;
 import static io.trino.plugin.iceberg.IcebergTestUtils.withSmallRowGroups;
 import static io.trino.testing.TestingAccessControlManager.TestingPrivilegeType.DROP_TABLE;
 import static io.trino.testing.TestingAccessControlManager.privilege;
+import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static java.lang.String.format;
+import static java.time.format.DateTimeFormatter.ISO_INSTANT;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -56,28 +61,27 @@ public abstract class BaseIcebergConnectorSmokeTest
         extends BaseConnectorSmokeTest
 {
     protected final FileFormat format;
-    private final TrinoFileSystem trinoFileSystem;
+    protected TrinoFileSystem fileSystem;
 
     public BaseIcebergConnectorSmokeTest(FileFormat format)
     {
         this.format = requireNonNull(format, "format is null");
-        this.trinoFileSystem = new HdfsFileSystemFactory(HDFS_ENVIRONMENT, HDFS_FILE_SYSTEM_STATS).create(TestingConnectorSession.SESSION);
     }
 
-    @SuppressWarnings("DuplicateBranchesInSwitch")
+    @BeforeClass
+    public void initFileSystem()
+    {
+        fileSystem = getFileSystemFactory(getDistributedQueryRunner()).create(SESSION);
+    }
+
     @Override
     protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior)
     {
-        switch (connectorBehavior) {
-            case SUPPORTS_TRUNCATE:
-                return false;
-
-            case SUPPORTS_TOPN_PUSHDOWN:
-                return false;
-
-            default:
-                return super.hasBehavior(connectorBehavior);
-        }
+        return switch (connectorBehavior) {
+            case SUPPORTS_TOPN_PUSHDOWN,
+                    SUPPORTS_TRUNCATE -> false;
+            default -> super.hasBehavior(connectorBehavior);
+        };
     }
 
     @Test
@@ -120,33 +124,38 @@ public abstract class BaseIcebergConnectorSmokeTest
         int threads = 4;
         CyclicBarrier barrier = new CyclicBarrier(threads);
         ExecutorService executor = newFixedThreadPool(threads);
+        List<String> rows = ImmutableList.of("(1, 0, 0, 0)", "(0, 1, 0, 0)", "(0, 0, 1, 0)", "(0, 0, 0, 1)");
+
+        String[] expectedErrors = new String[]{"Failed to commit Iceberg update to table:", "Failed to replace table due to concurrent updates:"};
         try (TestTable table = new TestTable(
                 getQueryRunner()::execute,
                 "test_concurrent_delete",
                 "(col0 INTEGER, col1 INTEGER, col2 INTEGER, col3 INTEGER)")) {
             String tableName = table.getName();
-            assertUpdate("INSERT INTO " + tableName + " VALUES (0, 0, 0, 0)", 1);
-            assertUpdate("INSERT INTO " + tableName + " VALUES (1, 0, 0, 0)", 1);
-            assertUpdate("INSERT INTO " + tableName + " VALUES (0, 1, 0, 0)", 1);
-            assertUpdate("INSERT INTO " + tableName + " VALUES (0, 0, 1, 0)", 1);
-            assertUpdate("INSERT INTO " + tableName + " VALUES (0, 0, 0, 1)", 1);
+            assertUpdate("INSERT INTO " + tableName + " VALUES " + String.join(", ", rows), 4);
 
             List<Future<Boolean>> futures = IntStream.range(0, threads)
                     .mapToObj(threadNumber -> executor.submit(() -> {
                         barrier.await(10, SECONDS);
+                        String columnName = "col" + threadNumber;
                         try {
-                            String columnName = "col" + threadNumber;
                             getQueryRunner().execute(format("DELETE FROM %s WHERE %s = 1", tableName, columnName));
                             return true;
                         }
                         catch (Exception e) {
+                            assertThat(e.getMessage()).containsAnyOf(expectedErrors);
                             return false;
                         }
                     }))
                     .collect(toImmutableList());
 
-            futures.forEach(future -> assertTrue(getFutureValue(future)));
-            assertThat(query("SELECT max(col0), max(col1), max(col2), max(col3) FROM " + tableName)).matches("VALUES (0, 0, 0, 0)");
+            Stream<Optional<String>> expectedRows = Streams.mapWithIndex(futures.stream(), (future, index) -> {
+                boolean deleteSuccessful = tryGetFutureValue(future, 10, SECONDS).orElseThrow();
+                return deleteSuccessful ? Optional.empty() : Optional.of(rows.get((int) index));
+            });
+            List<String> expectedValues = expectedRows.filter(Optional::isPresent).map(Optional::get).collect(toImmutableList());
+            assertThat(expectedValues).as("Expected at least one delete operation to pass").hasSizeLessThan(rows.size());
+            assertThat(query("SELECT * FROM " + tableName)).matches("VALUES " + String.join(", ", expectedValues));
         }
         finally {
             executor.shutdownNow();
@@ -501,13 +510,13 @@ public abstract class BaseIcebergConnectorSmokeTest
         Location tableLocation = Location.of(getTableLocation(tableName));
 
         // Delete current metadata file
-        trinoFileSystem.deleteFile(metadataLocation);
-        assertFalse(trinoFileSystem.newInputFile(metadataLocation).exists(), "Current metadata file should not exist");
+        fileSystem.deleteFile(metadataLocation);
+        assertFalse(fileSystem.newInputFile(metadataLocation).exists(), "Current metadata file should not exist");
 
         // try to drop table
         assertUpdate("DROP TABLE " + tableName);
         assertFalse(getQueryRunner().tableExists(getSession(), tableName));
-        assertFalse(trinoFileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
+        assertFalse(fileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
     }
 
     @Test
@@ -518,18 +527,18 @@ public abstract class BaseIcebergConnectorSmokeTest
         assertUpdate("CREATE TABLE " + tableName + " AS SELECT 1 x, 'INDIA' y", 1);
 
         String metadataLocation = getMetadataLocation(tableName);
-        TableMetadata tableMetadata = TableMetadataParser.read(new ForwardingFileIo(trinoFileSystem), metadataLocation);
+        TableMetadata tableMetadata = TableMetadataParser.read(new ForwardingFileIo(fileSystem), metadataLocation);
         Location tableLocation = Location.of(tableMetadata.location());
         Location currentSnapshotFile = Location.of(tableMetadata.currentSnapshot().manifestListLocation());
 
         // Delete current snapshot file
-        trinoFileSystem.deleteFile(currentSnapshotFile);
-        assertFalse(trinoFileSystem.newInputFile(currentSnapshotFile).exists(), "Current snapshot file should not exist");
+        fileSystem.deleteFile(currentSnapshotFile);
+        assertFalse(fileSystem.newInputFile(currentSnapshotFile).exists(), "Current snapshot file should not exist");
 
         // try to drop table
         assertUpdate("DROP TABLE " + tableName);
         assertFalse(getQueryRunner().tableExists(getSession(), tableName));
-        assertFalse(trinoFileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
+        assertFalse(fileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
     }
 
     @Test
@@ -540,19 +549,19 @@ public abstract class BaseIcebergConnectorSmokeTest
         assertUpdate("CREATE TABLE " + tableName + " AS SELECT 1 x, 'INDIA' y", 1);
 
         String metadataLocation = getMetadataLocation(tableName);
-        FileIO fileIo = new ForwardingFileIo(trinoFileSystem);
+        FileIO fileIo = new ForwardingFileIo(fileSystem);
         TableMetadata tableMetadata = TableMetadataParser.read(fileIo, metadataLocation);
         Location tableLocation = Location.of(tableMetadata.location());
         Location manifestListFile = Location.of(tableMetadata.currentSnapshot().allManifests(fileIo).get(0).path());
 
         // Delete Manifest List file
-        trinoFileSystem.deleteFile(manifestListFile);
-        assertFalse(trinoFileSystem.newInputFile(manifestListFile).exists(), "Manifest list file should not exist");
+        fileSystem.deleteFile(manifestListFile);
+        assertFalse(fileSystem.newInputFile(manifestListFile).exists(), "Manifest list file should not exist");
 
         // try to drop table
         assertUpdate("DROP TABLE " + tableName);
         assertFalse(getQueryRunner().tableExists(getSession(), tableName));
-        assertFalse(trinoFileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
+        assertFalse(fileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
     }
 
     @Test
@@ -565,18 +574,18 @@ public abstract class BaseIcebergConnectorSmokeTest
 
         Location tableLocation = Location.of(getTableLocation(tableName));
         Location tableDataPath = tableLocation.appendPath("data");
-        FileIterator fileIterator = trinoFileSystem.listFiles(tableDataPath);
+        FileIterator fileIterator = fileSystem.listFiles(tableDataPath);
         assertTrue(fileIterator.hasNext());
         Location dataFile = fileIterator.next().location();
 
         // Delete data file
-        trinoFileSystem.deleteFile(dataFile);
-        assertFalse(trinoFileSystem.newInputFile(dataFile).exists(), "Data file should not exist");
+        fileSystem.deleteFile(dataFile);
+        assertFalse(fileSystem.newInputFile(dataFile).exists(), "Data file should not exist");
 
         // try to drop table
         assertUpdate("DROP TABLE " + tableName);
         assertFalse(getQueryRunner().tableExists(getSession(), tableName));
-        assertFalse(trinoFileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
+        assertFalse(fileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
     }
 
     @Test
@@ -590,8 +599,8 @@ public abstract class BaseIcebergConnectorSmokeTest
         Location tableLocation = Location.of(getTableLocation(tableName));
 
         // Delete table location
-        trinoFileSystem.deleteDirectory(tableLocation);
-        assertFalse(trinoFileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
+        fileSystem.deleteDirectory(tableLocation);
+        assertFalse(fileSystem.listFiles(tableLocation).hasNext(), "Table location should not exist");
 
         // try to drop table
         assertUpdate("DROP TABLE " + tableName);
@@ -605,8 +614,11 @@ public abstract class BaseIcebergConnectorSmokeTest
         try (TestTable table = new TestTable(
                 getQueryRunner()::execute,
                 "test_metadata_tables",
-                "(id int, part varchar) WITH (partitioning = ARRAY['part'])",
-                ImmutableList.of("1, 'p1'", "2, 'p1'", "3, 'p2'"))) {
+                "(id int, part varchar) WITH (partitioning = ARRAY['part'])")) {
+            assertUpdate("INSERT INTO " + table.getName() + " VALUES (1, 'p1')", 1);
+            assertUpdate("INSERT INTO " + table.getName() + " VALUES (2, 'p1')", 1);
+            assertUpdate("INSERT INTO " + table.getName() + " VALUES (3, 'p2')", 1);
+
             List<Long> snapshotIds = computeActual("SELECT snapshot_id FROM \"" + table.getName() + "$snapshots\" ORDER BY committed_at DESC")
                     .getOnlyColumn()
                     .map(Long.class::cast)
@@ -627,14 +639,74 @@ public abstract class BaseIcebergConnectorSmokeTest
 
     protected abstract boolean isFileSorted(Location path, String sortColumnName);
 
+    @Test
+    public void testTableChangesFunction()
+    {
+        try (TestTable table = new TestTable(
+                getQueryRunner()::execute,
+                "test_table_changes_function_",
+                "AS SELECT nationkey, name FROM tpch.tiny.nation WITH NO DATA")) {
+            long initialSnapshot = getMostRecentSnapshotId(table.getName());
+            assertUpdate("INSERT INTO " + table.getName() + " SELECT nationkey, name FROM nation", 25);
+            long snapshotAfterInsert = getMostRecentSnapshotId(table.getName());
+            String snapshotAfterInsertTime = getSnapshotTime(table.getName(), snapshotAfterInsert).format(ISO_INSTANT);
+
+            assertQuery(
+                    "SELECT nationkey, name, _change_type, _change_version_id, to_iso8601(_change_timestamp), _change_ordinal " +
+                            "FROM TABLE(system.table_changes(CURRENT_SCHEMA, '%s', %s, %s))".formatted(table.getName(), initialSnapshot, snapshotAfterInsert),
+                    "SELECT nationkey, name, 'insert', %s, '%s', 0 FROM nation".formatted(snapshotAfterInsert, snapshotAfterInsertTime));
+
+            assertUpdate("DELETE FROM " + table.getName(), 25);
+            long snapshotAfterDelete = getMostRecentSnapshotId(table.getName());
+            String snapshotAfterDeleteTime = getSnapshotTime(table.getName(), snapshotAfterDelete).format(ISO_INSTANT);
+
+            assertQuery(
+                    "SELECT nationkey, name, _change_type, _change_version_id, to_iso8601(_change_timestamp), _change_ordinal " +
+                            "FROM TABLE(system.table_changes(CURRENT_SCHEMA, '%s', %s, %s))".formatted(table.getName(), snapshotAfterInsert, snapshotAfterDelete),
+                    "SELECT nationkey, name, 'delete', %s, '%s', 0 FROM nation".formatted(snapshotAfterDelete, snapshotAfterDeleteTime));
+
+            assertQuery(
+                    "SELECT nationkey, name, _change_type, _change_version_id, to_iso8601(_change_timestamp), _change_ordinal " +
+                            "FROM TABLE(system.table_changes(CURRENT_SCHEMA, '%s', %s, %s))".formatted(table.getName(), initialSnapshot, snapshotAfterDelete),
+                    "SELECT nationkey, name, 'insert', %s, '%s', 0 FROM nation UNION SELECT nationkey, name, 'delete', %s, '%s', 1 FROM nation".formatted(
+                            snapshotAfterInsert, snapshotAfterInsertTime, snapshotAfterDelete, snapshotAfterDeleteTime));
+        }
+    }
+
+    @Test
+    public void testRowLevelDeletesWithTableChangesFunction()
+    {
+        try (TestTable table = new TestTable(
+                getQueryRunner()::execute,
+                "test_row_level_deletes_with_table_changes_function_",
+                "AS SELECT nationkey, regionkey, name FROM tpch.tiny.nation WITH NO DATA")) {
+            assertUpdate("INSERT INTO " + table.getName() + " SELECT nationkey, regionkey, name FROM nation", 25);
+            long snapshotAfterInsert = getMostRecentSnapshotId(table.getName());
+
+            assertUpdate("DELETE FROM " + table.getName() + " WHERE regionkey = 2", 5);
+            long snapshotAfterDelete = getMostRecentSnapshotId(table.getName());
+
+            assertQueryFails(
+                    "SELECT * FROM TABLE(system.table_changes(CURRENT_SCHEMA, '%s', %s, %s))".formatted(table.getName(), snapshotAfterInsert, snapshotAfterDelete),
+                    "Table uses features which are not yet supported by the table_changes function");
+        }
+    }
+
+    private long getMostRecentSnapshotId(String tableName)
+    {
+        return (long) Iterables.getOnlyElement(getQueryRunner().execute(format("SELECT snapshot_id FROM \"%s$snapshots\" ORDER BY committed_at DESC LIMIT 1", tableName))
+                .getOnlyColumnAsSet());
+    }
+
+    private ZonedDateTime getSnapshotTime(String tableName, long snapshotId)
+    {
+        return (ZonedDateTime) Iterables.getOnlyElement(getQueryRunner().execute(format("SELECT committed_at FROM \"%s$snapshots\" WHERE snapshot_id = %s", tableName, snapshotId))
+                .getOnlyColumnAsSet());
+    }
+
     private String getTableLocation(String tableName)
     {
         return (String) computeScalar("SELECT DISTINCT regexp_replace(\"$path\", '/[^/]*/[^/]*$', '') FROM " + tableName);
-    }
-
-    protected String getColumnComment(String tableName, String columnName)
-    {
-        return (String) computeScalar("SELECT comment FROM information_schema.columns WHERE table_schema = '" + getSession().getSchema().orElseThrow() + "' AND table_name = '" + tableName + "' AND column_name = '" + columnName + "'");
     }
 
     protected abstract void dropTableFromMetastore(String tableName);

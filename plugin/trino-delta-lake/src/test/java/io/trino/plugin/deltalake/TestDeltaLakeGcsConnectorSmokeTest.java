@@ -27,16 +27,14 @@ import io.trino.filesystem.TrinoOutputFile;
 import io.trino.hadoop.ConfigurationInstantiator;
 import io.trino.hdfs.gcs.GoogleGcsConfigurationInitializer;
 import io.trino.hdfs.gcs.HiveGcsConfig;
-import io.trino.plugin.hive.containers.HiveMinioDataLake;
+import io.trino.plugin.hive.containers.HiveHadoop;
 import io.trino.testing.QueryRunner;
 import org.apache.hadoop.conf.Configuration;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Parameters;
 
-import java.io.ByteArrayInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -55,6 +53,7 @@ import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 import static java.util.regex.Matcher.quoteReplacement;
+import static org.testcontainers.containers.Network.newNetwork;
 
 /**
  * This test requires these variables to connect to GCS:
@@ -72,6 +71,7 @@ public class TestDeltaLakeGcsConnectorSmokeTest
     private final String gcpCredentialKey;
 
     private Path gcpCredentialsFile;
+    private String gcpCredentials;
     private TrinoFileSystem fileSystem;
 
     @Parameters({"testing.gcp-storage-bucket", "testing.gcp-credentials-key"})
@@ -84,13 +84,13 @@ public class TestDeltaLakeGcsConnectorSmokeTest
     @Override
     protected void environmentSetup()
     {
-        InputStream jsonKey = new ByteArrayInputStream(Base64.getDecoder().decode(gcpCredentialKey));
+        byte[] jsonKeyBytes = Base64.getDecoder().decode(gcpCredentialKey);
+        gcpCredentials = new String(jsonKeyBytes, UTF_8);
         try {
             this.gcpCredentialsFile = Files.createTempFile("gcp-credentials", ".json", READ_ONLY_PERMISSIONS);
             gcpCredentialsFile.toFile().deleteOnExit();
-            Files.write(gcpCredentialsFile, jsonKey.readAllBytes());
-
-            HiveGcsConfig gcsConfig = new HiveGcsConfig().setJsonKeyFilePath(gcpCredentialsFile.toAbsolutePath().toString());
+            Files.write(gcpCredentialsFile, jsonKeyBytes);
+            HiveGcsConfig gcsConfig = new HiveGcsConfig().setJsonKey(gcpCredentials);
             Configuration configuration = ConfigurationInstantiator.newEmptyConfiguration();
             new GoogleGcsConfigurationInitializer(gcsConfig).initializeConfiguration(configuration);
         }
@@ -115,7 +115,7 @@ public class TestDeltaLakeGcsConnectorSmokeTest
     }
 
     @Override
-    protected HiveMinioDataLake createHiveMinioDataLake()
+    protected HiveHadoop createHiveHadoop()
             throws Exception
     {
         String gcpSpecificCoreSiteXmlContent = Resources.toString(Resources.getResource("io/trino/plugin/deltalake/hdp3.1-core-site.xml.gcs-template"), UTF_8)
@@ -125,21 +125,22 @@ public class TestDeltaLakeGcsConnectorSmokeTest
         hadoopCoreSiteXmlTempFile.toFile().deleteOnExit();
         Files.writeString(hadoopCoreSiteXmlTempFile, gcpSpecificCoreSiteXmlContent);
 
-        HiveMinioDataLake dataLake = new HiveMinioDataLake(
-                bucketName,
-                ImmutableMap.of(
+        HiveHadoop hiveHadoop = HiveHadoop.builder()
+                .withImage(HIVE3_IMAGE)
+                .withNetwork(closeAfterClass(newNetwork()))
+                .withFilesToMount(ImmutableMap.of(
                         "/etc/hadoop/conf/core-site.xml", hadoopCoreSiteXmlTempFile.normalize().toAbsolutePath().toString(),
-                        "/etc/hadoop/conf/gcp-credentials.json", gcpCredentialsFile.toAbsolutePath().toString()),
-                HIVE3_IMAGE);
-        dataLake.start();
-        return dataLake;
+                        "/etc/hadoop/conf/gcp-credentials.json", gcpCredentialsFile.toAbsolutePath().toString()))
+                .build();
+        hiveHadoop.start();
+        return hiveHadoop; // closed by superclass
     }
 
     @Override
-    protected Map<String, String> storageConfiguration()
+    protected Map<String, String> hiveStorageConfiguration()
     {
         return ImmutableMap.<String, String>builder()
-                .put("hive.gcs.json-key-file-path", gcpCredentialsFile.toAbsolutePath().toString())
+                .put("hive.gcs.json-key", gcpCredentials)
                 .buildOrThrow();
     }
 
@@ -147,6 +148,7 @@ public class TestDeltaLakeGcsConnectorSmokeTest
     protected Map<String, String> deltaStorageConfiguration()
     {
         return ImmutableMap.<String, String>builder()
+                .putAll(hiveStorageConfiguration())
                 // TODO why not unique table locations? (This is here since 52bf6680c1b25516f6e8e64f82ada089abc0c9d3.)
                 .put("delta.unique-table-location", "false")
                 .buildOrThrow();
@@ -194,10 +196,9 @@ public class TestDeltaLakeGcsConnectorSmokeTest
     }
 
     @Override
-    protected List<String> listCheckpointFiles(String transactionLogDirectory)
+    protected List<String> listFiles(String directory)
     {
-        return listAllFilesRecursive(transactionLogDirectory).stream()
-                .filter(path -> path.contains("checkpoint.parquet"))
+        return listAllFilesRecursive(directory).stream()
                 .collect(toImmutableList());
     }
 
@@ -216,6 +217,17 @@ public class TestDeltaLakeGcsConnectorSmokeTest
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
+    protected void deleteFile(String filePath)
+    {
+        try {
+            fileSystem.deleteFile(Location.of(filePath));
+        }
+        catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

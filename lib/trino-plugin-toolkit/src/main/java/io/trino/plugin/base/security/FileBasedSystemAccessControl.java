@@ -36,6 +36,7 @@ import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
 
 import java.security.Principal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -107,7 +108,6 @@ import static io.trino.spi.security.AccessDeniedException.denySetViewAuthorizati
 import static io.trino.spi.security.AccessDeniedException.denyShowColumns;
 import static io.trino.spi.security.AccessDeniedException.denyShowCreateSchema;
 import static io.trino.spi.security.AccessDeniedException.denyShowCreateTable;
-import static io.trino.spi.security.AccessDeniedException.denyShowRoleAuthorizationDescriptors;
 import static io.trino.spi.security.AccessDeniedException.denyShowSchemas;
 import static io.trino.spi.security.AccessDeniedException.denyShowTables;
 import static io.trino.spi.security.AccessDeniedException.denyTruncateTable;
@@ -129,6 +129,7 @@ public class FileBasedSystemAccessControl
     private final Optional<List<ImpersonationRule>> impersonationRules;
     private final Optional<List<PrincipalUserMatchRule>> principalUserMatchRules;
     private final Optional<List<SystemInformationRule>> systemInformationRules;
+    private final List<AuthorizationRule> authorizationRules;
     private final List<CatalogSchemaAccessControlRule> schemaRules;
     private final List<CatalogTableAccessControlRule> tableRules;
     private final List<SessionPropertyAccessControlRule> sessionPropertyRules;
@@ -143,6 +144,7 @@ public class FileBasedSystemAccessControl
             Optional<List<ImpersonationRule>> impersonationRules,
             Optional<List<PrincipalUserMatchRule>> principalUserMatchRules,
             Optional<List<SystemInformationRule>> systemInformationRules,
+            List<AuthorizationRule> authorizationRules,
             List<CatalogSchemaAccessControlRule> schemaRules,
             List<CatalogTableAccessControlRule> tableRules,
             List<SessionPropertyAccessControlRule> sessionPropertyRules,
@@ -154,6 +156,7 @@ public class FileBasedSystemAccessControl
         this.impersonationRules = impersonationRules;
         this.principalUserMatchRules = principalUserMatchRules;
         this.systemInformationRules = systemInformationRules;
+        this.authorizationRules = authorizationRules;
         this.schemaRules = schemaRules;
         this.tableRules = tableRules;
         this.sessionPropertyRules = sessionPropertyRules;
@@ -223,9 +226,8 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
-    public void checkCanImpersonateUser(SystemSecurityContext context, String userName)
+    public void checkCanImpersonateUser(Identity identity, String userName)
     {
-        Identity identity = context.getIdentity();
         if (impersonationRules.isEmpty()) {
             // if there are principal user match rules, we assume that impersonation checks are
             // handled there; otherwise, impersonation must be manually configured
@@ -278,37 +280,36 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
-    public void checkCanExecuteQuery(SystemSecurityContext context)
+    public void checkCanExecuteQuery(Identity identity)
     {
-        if (!canAccessQuery(context.getIdentity(), Optional.empty(), QueryAccessRule.AccessMode.EXECUTE)) {
+        if (!canAccessQuery(identity, Optional.empty(), QueryAccessRule.AccessMode.EXECUTE)) {
             denyViewQuery();
         }
     }
 
     @Override
-    public void checkCanViewQueryOwnedBy(SystemSecurityContext context, String queryOwner)
+    public void checkCanViewQueryOwnedBy(Identity identity, Identity queryOwner)
     {
-        if (!canAccessQuery(context.getIdentity(), Optional.of(queryOwner), QueryAccessRule.AccessMode.VIEW)) {
+        if (!canAccessQuery(identity, Optional.of(queryOwner.getUser()), QueryAccessRule.AccessMode.VIEW)) {
             denyViewQuery();
         }
     }
 
     @Override
-    public Set<String> filterViewQueryOwnedBy(SystemSecurityContext context, Set<String> queryOwners)
+    public Collection<Identity> filterViewQueryOwnedBy(Identity identity, Collection<Identity> queryOwners)
     {
         if (queryAccessRules.isEmpty()) {
             return queryOwners;
         }
-        Identity identity = context.getIdentity();
         return queryOwners.stream()
-                .filter(owner -> canAccessQuery(identity, Optional.of(owner), QueryAccessRule.AccessMode.VIEW))
+                .filter(owner -> canAccessQuery(identity, Optional.of(owner.getUser()), QueryAccessRule.AccessMode.VIEW))
                 .collect(toImmutableSet());
     }
 
     @Override
-    public void checkCanKillQueryOwnedBy(SystemSecurityContext context, String queryOwner)
+    public void checkCanKillQueryOwnedBy(Identity identity, Identity queryOwner)
     {
-        if (!canAccessQuery(context.getIdentity(), Optional.of(queryOwner), QueryAccessRule.AccessMode.KILL)) {
+        if (!canAccessQuery(identity, Optional.of(queryOwner.getUser()), QueryAccessRule.AccessMode.KILL)) {
             denyViewQuery();
         }
     }
@@ -328,17 +329,17 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
-    public void checkCanReadSystemInformation(SystemSecurityContext context)
+    public void checkCanReadSystemInformation(Identity identity)
     {
-        if (!checkCanSystemInformation(context.getIdentity(), SystemInformationRule.AccessMode.READ)) {
+        if (!checkCanSystemInformation(identity, SystemInformationRule.AccessMode.READ)) {
             denyReadSystemInformationAccess();
         }
     }
 
     @Override
-    public void checkCanWriteSystemInformation(SystemSecurityContext context)
+    public void checkCanWriteSystemInformation(Identity identity)
     {
-        if (!checkCanSystemInformation(context.getIdentity(), SystemInformationRule.AccessMode.WRITE)) {
+        if (!checkCanSystemInformation(identity, SystemInformationRule.AccessMode.WRITE)) {
             denyWriteSystemInformationAccess();
         }
     }
@@ -355,9 +356,8 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
-    public void checkCanSetSystemSessionProperty(SystemSecurityContext context, String propertyName)
+    public void checkCanSetSystemSessionProperty(Identity identity, String propertyName)
     {
-        Identity identity = context.getIdentity();
         boolean allowed = sessionPropertyRules.stream()
                 .map(rule -> rule.match(identity.getUser(), identity.getEnabledRoles(), identity.getGroups(), propertyName))
                 .flatMap(Optional::stream)
@@ -432,6 +432,9 @@ public class FileBasedSystemAccessControl
     public void checkCanSetSchemaAuthorization(SystemSecurityContext context, CatalogSchemaName schema, TrinoPrincipal principal)
     {
         if (!isSchemaOwner(context, schema)) {
+            denySetSchemaAuthorization(schema.toString(), principal);
+        }
+        if (!checkCanSetAuthorization(context, principal)) {
             denySetSchemaAuthorization(schema.toString(), principal);
         }
     }
@@ -591,6 +594,13 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
+    public Map<SchemaTableName, Set<String>> filterColumns(SystemSecurityContext context, String catalogName, Map<SchemaTableName, Set<String>> tableColumns)
+    {
+        // Default implementation is good enough. Explicit implementation is expected by the test though.
+        return SystemAccessControl.super.filterColumns(context, catalogName, tableColumns);
+    }
+
+    @Override
     public void checkCanAddColumn(SystemSecurityContext context, CatalogSchemaTableName table)
     {
         if (!checkTablePermission(context, table, OWNERSHIP)) {
@@ -626,6 +636,9 @@ public class FileBasedSystemAccessControl
     public void checkCanSetTableAuthorization(SystemSecurityContext context, CatalogSchemaTableName table, TrinoPrincipal principal)
     {
         if (!checkTablePermission(context, table, OWNERSHIP)) {
+            denySetTableAuthorization(table.toString(), principal);
+        }
+        if (!checkCanSetAuthorization(context, principal)) {
             denySetTableAuthorization(table.toString(), principal);
         }
     }
@@ -698,6 +711,9 @@ public class FileBasedSystemAccessControl
     public void checkCanSetViewAuthorization(SystemSecurityContext context, CatalogSchemaTableName view, TrinoPrincipal principal)
     {
         if (!checkTablePermission(context, view, OWNERSHIP)) {
+            denySetViewAuthorization(view.toString(), principal);
+        }
+        if (!checkCanSetAuthorization(context, principal)) {
             denySetViewAuthorization(view.toString(), principal);
         }
     }
@@ -899,12 +915,6 @@ public class FileBasedSystemAccessControl
     }
 
     @Override
-    public void checkCanShowRoleAuthorizationDescriptors(SystemSecurityContext context)
-    {
-        denyShowRoleAuthorizationDescriptors();
-    }
-
-    @Override
     public void checkCanShowCurrentRoles(SystemSecurityContext context)
     {
         // users can see their currently enabled roles
@@ -996,12 +1006,6 @@ public class FileBasedSystemAccessControl
         }
 
         return masks.stream().findFirst();
-    }
-
-    @Override
-    public List<ViewExpression> getColumnMasks(SystemSecurityContext context, CatalogSchemaTableName table, String columnName, Type type)
-    {
-        throw new UnsupportedOperationException();
     }
 
     private boolean checkAnyCatalogAccess(SystemSecurityContext context, String catalogName)
@@ -1109,6 +1113,15 @@ public class FileBasedSystemAccessControl
                         .isPresent();
     }
 
+    private boolean checkCanSetAuthorization(SystemSecurityContext context, TrinoPrincipal principal)
+    {
+        Identity identity = context.getIdentity();
+        return authorizationRules.stream()
+                .flatMap(rule -> rule.match(identity.getUser(), identity.getGroups(), identity.getEnabledRoles(), principal).stream())
+                .findFirst()
+                .orElse(false);
+    }
+
     public static Builder builder()
     {
         return new Builder();
@@ -1121,6 +1134,7 @@ public class FileBasedSystemAccessControl
         private Optional<List<ImpersonationRule>> impersonationRules = Optional.empty();
         private Optional<List<PrincipalUserMatchRule>> principalUserMatchRules = Optional.empty();
         private Optional<List<SystemInformationRule>> systemInformationRules = Optional.empty();
+        private List<AuthorizationRule> authorizationRules = ImmutableList.of();
         private List<CatalogSchemaAccessControlRule> schemaRules = ImmutableList.of(CatalogSchemaAccessControlRule.ALLOW_ALL);
         private List<CatalogTableAccessControlRule> tableRules = ImmutableList.of(CatalogTableAccessControlRule.ALLOW_ALL);
         private List<SessionPropertyAccessControlRule> sessionPropertyRules = ImmutableList.of(SessionPropertyAccessControlRule.ALLOW_ALL);
@@ -1135,6 +1149,7 @@ public class FileBasedSystemAccessControl
             impersonationRules = Optional.of(ImmutableList.of());
             principalUserMatchRules = Optional.of(ImmutableList.of());
             systemInformationRules = Optional.of(ImmutableList.of());
+            authorizationRules = ImmutableList.of();
             schemaRules = ImmutableList.of();
             tableRules = ImmutableList.of();
             sessionPropertyRules = ImmutableList.of();
@@ -1170,6 +1185,12 @@ public class FileBasedSystemAccessControl
         public Builder setSystemInformationRules(Optional<List<SystemInformationRule>> systemInformationRules)
         {
             this.systemInformationRules = systemInformationRules;
+            return this;
+        }
+
+        public Builder setAuthorizationRules(List<AuthorizationRule> authorizationRules)
+        {
+            this.authorizationRules = authorizationRules;
             return this;
         }
 
@@ -1211,6 +1232,7 @@ public class FileBasedSystemAccessControl
                     impersonationRules,
                     principalUserMatchRules,
                     systemInformationRules,
+                    authorizationRules,
                     schemaRules,
                     tableRules,
                     sessionPropertyRules,

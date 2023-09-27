@@ -35,11 +35,11 @@ import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.connector.WriterScalingOptions;
 import io.trino.spi.type.Type;
 import io.trino.split.PageSinkManager;
 import io.trino.sql.planner.plan.PlanNodeId;
 import io.trino.sql.planner.plan.TableWriterNode.CreateTarget;
-import io.trino.sql.tree.QualifiedName;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
@@ -76,7 +76,7 @@ import static org.testng.Assert.assertTrue;
 
 public class TestTableWriterOperator
 {
-    private static final TestingAggregationFunction LONG_MAX = new TestingFunctionResolution().getAggregateFunction(QualifiedName.of("max"), fromTypes(BIGINT));
+    private static final TestingAggregationFunction LONG_MAX = new TestingFunctionResolution().getAggregateFunction("max", fromTypes(BIGINT));
     private ExecutorService executor;
     private ScheduledExecutorService scheduledExecutor;
 
@@ -298,8 +298,8 @@ public class TestTableWriterOperator
                                 new ConnectorOutputTableHandle() {}),
                         schemaTableName,
                         false,
-                        false,
-                        OptionalInt.empty()),
+                        OptionalInt.empty(),
+                        WriterScalingOptions.DISABLED),
                 ImmutableList.of(0),
                 session,
                 statisticsAggregation,

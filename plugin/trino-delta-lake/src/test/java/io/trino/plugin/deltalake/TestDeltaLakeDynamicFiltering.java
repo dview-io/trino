@@ -54,6 +54,7 @@ import static io.airlift.testing.Assertions.assertEqualsIgnoreOrder;
 import static io.airlift.testing.Assertions.assertGreaterThan;
 import static io.trino.SystemSessionProperties.ENABLE_DYNAMIC_FILTERING;
 import static io.trino.plugin.deltalake.DeltaLakeQueryRunner.DELTA_CATALOG;
+import static io.trino.plugin.deltalake.DeltaLakeQueryRunner.createS3DeltaLakeQueryRunner;
 import static io.trino.spi.connector.Constraint.alwaysTrue;
 import static io.trino.testing.DataProviders.toDataProvider;
 import static io.trino.testing.TestingNames.randomNameSuffix;
@@ -77,7 +78,7 @@ public class TestDeltaLakeDynamicFiltering
         hiveMinioDataLake = closeAfterClass(new HiveMinioDataLake(bucketName));
         hiveMinioDataLake.start();
 
-        QueryRunner queryRunner = DeltaLakeQueryRunner.createS3DeltaLakeQueryRunner(
+        QueryRunner queryRunner = createS3DeltaLakeQueryRunner(
                 DELTA_CATALOG,
                 "default",
                 ImmutableMap.of("delta.register-table-procedure.enabled", "true"),
@@ -86,7 +87,7 @@ public class TestDeltaLakeDynamicFiltering
 
         ImmutableList.of(LINE_ITEM, ORDERS).forEach(table -> {
             String tableName = table.getTableName();
-            hiveMinioDataLake.copyResources("io/trino/plugin/deltalake/testing/resources/databricks/" + tableName, tableName);
+            hiveMinioDataLake.copyResources("io/trino/plugin/deltalake/testing/resources/databricks73/" + tableName, tableName);
             queryRunner.execute(format("CALL %1$s.system.register_table('%2$s', '%3$s', 's3://%4$s/%3$s')",
                     DELTA_CATALOG,
                     "default",
@@ -113,7 +114,6 @@ public class TestDeltaLakeDynamicFiltering
 
         QueryInputStats filteredStats = getQueryInputStats(filteredResult.getQueryId());
         QueryInputStats unfilteredStats = getQueryInputStats(unfilteredResult.getQueryId());
-        assertGreaterThan(unfilteredStats.numberOfSplits, filteredStats.numberOfSplits);
         assertGreaterThan(unfilteredStats.inputPositions, filteredStats.inputPositions);
     }
 

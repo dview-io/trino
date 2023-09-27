@@ -14,6 +14,8 @@
 package io.trino.plugin.deltalake.procedure;
 
 import com.google.common.collect.ImmutableList;
+import com.google.inject.Inject;
+import com.google.inject.Provider;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
@@ -32,11 +34,9 @@ import io.trino.spi.connector.SchemaNotFoundException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.procedure.Procedure;
 
-import javax.inject.Inject;
-import javax.inject.Provider;
-
 import java.io.IOException;
 import java.lang.invoke.MethodHandle;
+import java.util.Optional;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static io.trino.plugin.base.util.Procedures.checkProcedureArgument;
@@ -156,11 +156,11 @@ public class RegisterTableProcedure
         Table table = buildTable(session, schemaTableName, tableLocation, true);
 
         PrincipalPrivileges principalPrivileges = buildInitialPrivilegeSet(table.getOwner().orElseThrow());
-        statisticsAccess.invalidateCache(tableLocation);
-        transactionLogAccess.invalidateCaches(tableLocation);
+        statisticsAccess.invalidateCache(schemaTableName, Optional.of(tableLocation));
+        transactionLogAccess.invalidateCache(schemaTableName, Optional.of(tableLocation));
         // Verify we're registering a location with a valid table
         try {
-            TableSnapshot tableSnapshot = transactionLogAccess.loadSnapshot(table.getSchemaTableName(), tableLocation, session);
+            TableSnapshot tableSnapshot = transactionLogAccess.getSnapshot(session, table.getSchemaTableName(), tableLocation, Optional.empty());
             transactionLogAccess.getMetadataEntry(tableSnapshot, session); // verify metadata exists
         }
         catch (TrinoException e) {

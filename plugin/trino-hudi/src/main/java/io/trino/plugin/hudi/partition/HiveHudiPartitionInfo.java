@@ -13,6 +13,7 @@
  */
 package io.trino.plugin.hudi.partition;
 
+import com.google.common.collect.ImmutableList;
 import io.trino.filesystem.Location;
 import io.trino.plugin.hive.HiveColumnHandle;
 import io.trino.plugin.hive.HivePartitionKey;
@@ -76,12 +77,6 @@ public class HiveHudiPartitionInfo
     }
 
     @Override
-    public String getHivePartitionName()
-    {
-        return hivePartitionName;
-    }
-
-    @Override
     public List<HivePartitionKey> getHivePartitionKeys()
     {
         if (hivePartitionKeys == null) {
@@ -93,13 +88,11 @@ public class HiveHudiPartitionInfo
     @Override
     public boolean doesMatchPredicates()
     {
+        if (hivePartitionName.equals("")) {
+            hivePartitionKeys = ImmutableList.of();
+            return true;
+        }
         return partitionMatchesPredicates(table.getSchemaTableName(), hivePartitionName, partitionColumnHandles, constraintSummary);
-    }
-
-    @Override
-    public String getComparingKey()
-    {
-        return hivePartitionName;
     }
 
     @Override
@@ -114,17 +107,13 @@ public class HiveHudiPartitionInfo
         this.hivePartitionKeys = buildPartitionKeys(partitionColumns, partition.get().getValues());
     }
 
-    /*
-     * Given a base partition and a partition path, return relative path of partition path to the base path.
-     * This is equivalent to org.apache.hudi.common.fs.FSUtils#getRelativePartitionPath
-     */
     private static String getRelativePartitionPath(Location baseLocation, Location fullPartitionLocation)
     {
         String basePath = baseLocation.path();
         String fullPartitionPath = fullPartitionLocation.path();
 
         if (!fullPartitionPath.startsWith(basePath)) {
-            throw new IllegalArgumentException("Partition path does not belong to base-path");
+            throw new IllegalArgumentException("Partition location does not belong to base-location");
         }
 
         String baseLocationParent = baseLocation.parentDirectory().path();

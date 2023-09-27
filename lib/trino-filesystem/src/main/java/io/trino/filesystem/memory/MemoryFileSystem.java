@@ -13,6 +13,7 @@
  */
 package io.trino.filesystem.memory;
 
+import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slice;
 import io.trino.filesystem.FileEntry;
 import io.trino.filesystem.FileIterator;
@@ -22,12 +23,13 @@ import io.trino.filesystem.TrinoInputFile;
 import io.trino.filesystem.TrinoOutputFile;
 import io.trino.filesystem.memory.MemoryOutputFile.OutputBlob;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.NoSuchFileException;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -95,7 +97,7 @@ public class MemoryFileSystem
             throws IOException
     {
         if (blobs.remove(toBlobKey(location)) == null) {
-            throw new NoSuchFileException(location.toString());
+            throw new FileNotFoundException(location.toString());
         }
     }
 
@@ -156,8 +158,45 @@ public class MemoryFileSystem
 
     @Override
     public Optional<Boolean> directoryExists(Location location)
+            throws IOException
     {
+        validateMemoryLocation(location);
+        if (location.path().isEmpty() || listFiles(location).hasNext()) {
+            return Optional.of(true);
+        }
         return Optional.empty();
+    }
+
+    @Override
+    public void createDirectory(Location location)
+            throws IOException
+    {
+        validateMemoryLocation(location);
+        // memory file system does not have directories
+    }
+
+    @Override
+    public void renameDirectory(Location source, Location target)
+            throws IOException
+    {
+        throw new IOException("Memory file system does not support directory renames");
+    }
+
+    @Override
+    public Set<Location> listDirectories(Location location)
+            throws IOException
+    {
+        String prefix = toBlobPrefix(location);
+        ImmutableSet.Builder<Location> directories = ImmutableSet.builder();
+        for (String key : blobs.keySet()) {
+            if (key.startsWith(prefix)) {
+                int index = key.indexOf('/', prefix.length() + 1);
+                if (index >= 0) {
+                    directories.add(Location.of("memory:///" + key.substring(0, index + 1)));
+                }
+            }
+        }
+        return directories.build();
     }
 
     private static String toBlobKey(Location location)

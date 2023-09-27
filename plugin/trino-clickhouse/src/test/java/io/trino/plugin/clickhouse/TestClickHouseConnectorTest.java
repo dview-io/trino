@@ -59,43 +59,29 @@ public class TestClickHouseConnectorTest
 {
     private TestingClickHouseServer clickhouseServer;
 
-    @SuppressWarnings("DuplicateBranchesInSwitch")
     @Override
     protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior)
     {
-        switch (connectorBehavior) {
-            case SUPPORTS_DELETE:
-                return false;
-            case SUPPORTS_TRUNCATE:
-                return true;
-
-            case SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_EQUALITY:
-            case SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY:
-            case SUPPORTS_TOPN_PUSHDOWN:
-                return false;
-
-            case SUPPORTS_AGGREGATION_PUSHDOWN_STDDEV:
-            case SUPPORTS_AGGREGATION_PUSHDOWN_VARIANCE:
-            case SUPPORTS_AGGREGATION_PUSHDOWN_COVARIANCE:
-            case SUPPORTS_AGGREGATION_PUSHDOWN_CORRELATION:
-            case SUPPORTS_AGGREGATION_PUSHDOWN_REGRESSION:
-            case SUPPORTS_AGGREGATION_PUSHDOWN_COUNT_DISTINCT:
-                return false;
-
-            case SUPPORTS_SET_COLUMN_TYPE:
-                return false;
-
-            case SUPPORTS_ARRAY:
-            case SUPPORTS_ROW_TYPE:
-            case SUPPORTS_NEGATIVE_DATE:
-                return false;
-
-            case SUPPORTS_NATIVE_QUERY:
-                return false;
-
-            default:
-                return super.hasBehavior(connectorBehavior);
-        }
+        return switch (connectorBehavior) {
+            case SUPPORTS_TRUNCATE -> true;
+            case SUPPORTS_AGGREGATION_PUSHDOWN_CORRELATION,
+                    SUPPORTS_AGGREGATION_PUSHDOWN_COUNT_DISTINCT,
+                    SUPPORTS_AGGREGATION_PUSHDOWN_COVARIANCE,
+                    SUPPORTS_AGGREGATION_PUSHDOWN_REGRESSION,
+                    SUPPORTS_AGGREGATION_PUSHDOWN_STDDEV,
+                    SUPPORTS_AGGREGATION_PUSHDOWN_VARIANCE,
+                    SUPPORTS_ARRAY,
+                    SUPPORTS_DELETE,
+                    SUPPORTS_NATIVE_QUERY,
+                    SUPPORTS_NEGATIVE_DATE,
+                    SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_EQUALITY,
+                    SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY,
+                    SUPPORTS_ROW_TYPE,
+                    SUPPORTS_SET_COLUMN_TYPE,
+                    SUPPORTS_TOPN_PUSHDOWN,
+                    SUPPORTS_UPDATE -> false;
+            default -> super.hasBehavior(connectorBehavior);
+        };
     }
 
     @Override
@@ -124,6 +110,20 @@ public class TestClickHouseConnectorTest
     {
         // ClickHouse need resets all data in a column for specified column which to be renamed
         throw new SkipException("TODO: test not implemented yet");
+    }
+
+    @Override
+    public void testRenameColumnWithComment()
+    {
+        try (TestTable table = new TestTable(
+                getQueryRunner()::execute,
+                "test_rename_column_",
+                "(id INT NOT NULL, col INT COMMENT 'test column comment') WITH (engine = 'MergeTree', order_by = ARRAY['id'])")) {
+            assertThat(getColumnComment(table.getName(), "col")).isEqualTo("test column comment");
+
+            assertUpdate("ALTER TABLE " + table.getName() + " RENAME COLUMN col TO renamed_col");
+            assertThat(getColumnComment(table.getName(), "renamed_col")).isEqualTo("test column comment");
+        }
     }
 
     @Override
@@ -580,8 +580,14 @@ public class TestClickHouseConnectorTest
                 return Optional.empty();
 
             case "date":
-                // TODO (https://github.com/trinodb/trino/issues/7101) enable the test
-                return Optional.empty();
+                // The connector supports date type, but these values are unsupported in ClickHouse
+                // See BaseClickHouseTypeMapping for additional test coverage
+                if (dataMappingTestSetup.getSampleValueLiteral().equals("DATE '0001-01-01'") ||
+                        dataMappingTestSetup.getSampleValueLiteral().equals("DATE '1582-10-05'") ||
+                        dataMappingTestSetup.getHighValueLiteral().equals("DATE '9999-12-31'")) {
+                    return Optional.empty();
+                }
+                return Optional.of(dataMappingTestSetup);
 
             case "time":
             case "time(6)":

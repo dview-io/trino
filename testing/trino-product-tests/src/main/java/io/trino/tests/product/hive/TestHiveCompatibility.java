@@ -16,14 +16,13 @@ package io.trino.tests.product.hive;
 import com.google.common.collect.ImmutableList;
 import com.google.common.math.IntMath;
 import com.google.inject.Inject;
+import com.google.inject.name.Named;
 import io.trino.plugin.hive.HiveTimestampPrecision;
 import io.trino.tempto.assertions.QueryAssert;
 import io.trino.tempto.query.QueryResult;
 import io.trino.tests.product.utils.JdbcDriverUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
-
-import javax.inject.Named;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -41,7 +40,6 @@ import java.util.function.Function;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
-import static io.trino.tempto.assertions.QueryAssert.assertThat;
 import static io.trino.tests.product.TestGroups.STORAGE_FORMATS_DETAILED;
 import static io.trino.tests.product.utils.JdbcDriverUtils.setSessionProperty;
 import static io.trino.tests.product.utils.QueryExecutors.onHive;
@@ -49,6 +47,7 @@ import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.stream.Collectors.joining;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestHiveCompatibility
         extends HiveProductTest

@@ -13,6 +13,7 @@
  */
 package io.trino.plugin.deltalake.statistics;
 
+import com.google.inject.Inject;
 import io.trino.plugin.deltalake.DeltaLakeColumnHandle;
 import io.trino.plugin.deltalake.DeltaLakeColumnMetadata;
 import io.trino.plugin.deltalake.DeltaLakeTableHandle;
@@ -29,8 +30,6 @@ import io.trino.spi.statistics.DoubleRange;
 import io.trino.spi.statistics.Estimate;
 import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.TypeManager;
-
-import javax.inject.Inject;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -77,7 +76,7 @@ public class FileBasedTableStatisticsProvider
         double numRecords = 0L;
 
         MetadataEntry metadata = tableHandle.getMetadataEntry();
-        List<DeltaLakeColumnMetadata> columnMetadata = DeltaLakeSchemaSupport.extractSchema(metadata, typeManager);
+        List<DeltaLakeColumnMetadata> columnMetadata = DeltaLakeSchemaSupport.extractSchema(metadata, tableHandle.getProtocolEntry(), typeManager);
         List<DeltaLakeColumnHandle> columns = columnMetadata.stream()
                 .map(columnMeta -> new DeltaLakeColumnHandle(
                         columnMeta.getName(),
@@ -85,7 +84,7 @@ public class FileBasedTableStatisticsProvider
                         columnMeta.getFieldId(),
                         columnMeta.getPhysicalName(),
                         columnMeta.getPhysicalColumnType(),
-                        metadata.getCanonicalPartitionColumns().contains(columnMeta.getName()) ? PARTITION_KEY : REGULAR,
+                        metadata.getOriginalPartitionColumns().contains(columnMeta.getName()) ? PARTITION_KEY : REGULAR,
                         Optional.empty()))
                 .collect(toImmutableList());
 
@@ -125,7 +124,7 @@ public class FileBasedTableStatisticsProvider
             TupleDomain<DeltaLakeColumnHandle> statisticsPredicate = createStatisticsPredicate(
                     addEntry,
                     predicatedColumns,
-                    tableHandle.getMetadataEntry().getCanonicalPartitionColumns());
+                    tableHandle.getMetadataEntry().getLowercasePartitionColumns());
             if (!tableHandle.getNonPartitionConstraint().overlaps(statisticsPredicate)) {
                 continue;
             }
@@ -182,7 +181,7 @@ public class FileBasedTableStatisticsProvider
 
         Optional<ExtendedStatistics> statistics = Optional.empty();
         if (isExtendedStatisticsEnabled(session)) {
-            statistics = statisticsAccess.readExtendedStatistics(session, tableHandle.getLocation());
+            statistics = statisticsAccess.readExtendedStatistics(session, tableHandle.getSchemaTableName(), tableHandle.getLocation());
         }
 
         for (DeltaLakeColumnHandle column : columns) {

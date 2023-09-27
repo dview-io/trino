@@ -14,6 +14,8 @@
 package io.trino.plugin.iceberg.catalog.rest;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.errorprone.annotations.concurrent.GuardedBy;
+import com.google.inject.Inject;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.plugin.base.CatalogName;
 import io.trino.plugin.hive.NodeVersion;
@@ -26,9 +28,6 @@ import io.trino.spi.security.ConnectorIdentity;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.rest.HTTPClient;
 import org.apache.iceberg.rest.RESTSessionCatalog;
-
-import javax.annotation.concurrent.GuardedBy;
-import javax.inject.Inject;
 
 import java.net.URI;
 import java.util.Optional;

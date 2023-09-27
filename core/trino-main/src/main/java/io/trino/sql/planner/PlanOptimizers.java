@@ -16,6 +16,7 @@ package io.trino.sql.planner;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.trino.SystemSessionProperties;
 import io.trino.cost.CostCalculator;
 import io.trino.cost.CostCalculator.EstimatedExchanges;
@@ -159,6 +160,7 @@ import io.trino.sql.planner.iterative.rule.PushLimitThroughProject;
 import io.trino.sql.planner.iterative.rule.PushLimitThroughSemiJoin;
 import io.trino.sql.planner.iterative.rule.PushLimitThroughUnion;
 import io.trino.sql.planner.iterative.rule.PushMergeWriterDeleteIntoConnector;
+import io.trino.sql.planner.iterative.rule.PushMergeWriterUpdateIntoConnector;
 import io.trino.sql.planner.iterative.rule.PushOffsetThroughProject;
 import io.trino.sql.planner.iterative.rule.PushPartialAggregationThroughExchange;
 import io.trino.sql.planner.iterative.rule.PushPartialAggregationThroughJoin;
@@ -253,8 +255,6 @@ import io.trino.sql.planner.optimizations.StatsRecordingPlanOptimizer;
 import io.trino.sql.planner.optimizations.TransformQuantifiedComparisonApplyToCorrelatedJoin;
 import io.trino.sql.planner.optimizations.UnaliasSymbolReferences;
 import io.trino.sql.planner.optimizations.WindowFilterPushDown;
-
-import javax.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
@@ -797,6 +797,7 @@ public class PlanOptimizers
                 ImmutableSet.of(
                         // Must run before AddExchanges
                         new PushMergeWriterDeleteIntoConnector(metadata),
+                        new PushMergeWriterUpdateIntoConnector(plannerContext, typeAnalyzer, metadata),
                         new DetermineTableScanNodePartitioning(metadata, nodePartitioningManager, taskCountEstimator),
                         // Must run after join reordering because join reordering creates
                         // new join nodes without JoinNode.maySkipOutputDuplicates flag set
@@ -856,7 +857,7 @@ public class PlanOptimizers
             builder.add(new UnaliasSymbolReferences(metadata));
             builder.add(new StatsRecordingPlanOptimizer(optimizerStats, new AddExchanges(plannerContext, typeAnalyzer, statsCalculator, taskCountEstimator)));
             // It can only run after AddExchanges since it estimates the hash partition count for all remote exchanges
-            builder.add(new StatsRecordingPlanOptimizer(optimizerStats, new DeterminePartitionCount(statsCalculator)));
+            builder.add(new StatsRecordingPlanOptimizer(optimizerStats, new DeterminePartitionCount(statsCalculator, taskCountEstimator)));
         }
 
         // use cost calculator without estimated exchanges after AddExchanges
@@ -898,7 +899,6 @@ public class PlanOptimizers
         // pushdown into the connectors. Invoke PredicatePushdown and PushPredicateIntoTableScan after this
         // to leverage predicate pushdown on projected columns and to pushdown dynamic filters.
         builder.add(new StatsRecordingPlanOptimizer(optimizerStats, new PredicatePushDown(plannerContext, typeAnalyzer, true, true)));
-        builder.add(new RemoveUnsupportedDynamicFilters(plannerContext)); // Remove unsupported dynamic filters introduced by PredicatePushdown
         builder.add(new IterativeOptimizer(
                 plannerContext,
                 ruleStats,
@@ -909,6 +909,9 @@ public class PlanOptimizers
                         .add(new PushPredicateIntoTableScan(plannerContext, typeAnalyzer, false))
                         .add(new RemoveRedundantPredicateAboveTableScan(plannerContext, typeAnalyzer))
                         .build()));
+        // Remove unsupported dynamic filters introduced by PredicatePushdown. Also, cleanup dynamic filters removed by
+        // PushPredicateIntoTableScan and RemoveRedundantPredicateAboveTableScan due to those rules replacing table scans with empty ValuesNode
+        builder.add(new RemoveUnsupportedDynamicFilters(plannerContext));
         builder.add(inlineProjections);
         builder.add(new UnaliasSymbolReferences(metadata)); // Run unalias after merging projections to simplify projections more efficiently
         builder.add(columnPruningOptimizer);

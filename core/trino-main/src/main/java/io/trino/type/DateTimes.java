@@ -51,8 +51,8 @@ public final class DateTimes
 {
     public static final Pattern DATETIME_PATTERN = Pattern.compile("" +
             "(?<year>[-+]?\\d{4,})-(?<month>\\d{1,2})-(?<day>\\d{1,2})" +
-            "(?: (?<hour>\\d{1,2}):(?<minute>\\d{1,2})(?::(?<second>\\d{1,2})(?:\\.(?<fraction>\\d+))?)?)?" +
-            "\\s*(?<timezone>.+)?");
+            "( (?:(?<hour>\\d{1,2}):(?<minute>\\d{1,2})(?::(?<second>\\d{1,2})(?:\\.(?<fraction>\\d+))?)?)?" +
+            "\\s*(?<timezone>.+)?)?");
     private static final String TIMESTAMP_FORMATTER_PATTERN = "uuuu-MM-dd HH:mm:ss";
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern(TIMESTAMP_FORMATTER_PATTERN);
 
@@ -634,7 +634,7 @@ public final class DateTimes
         checkArgument(precision > MAX_SHORT_PRECISION && precision <= TimestampType.MAX_PRECISION, "Precision is out of range");
         return new LongTimestamp(
                 start.getEpochSecond() * MICROSECONDS_PER_SECOND + start.getLong(MICRO_OF_SECOND),
-                (int) round((start.getNano() % PICOSECONDS_PER_NANOSECOND) * PICOSECONDS_PER_NANOSECOND, (int) (TimestampType.MAX_PRECISION - precision)));
+                (int) round((start.getNano() % PICOSECONDS_PER_NANOSECOND) * (long) PICOSECONDS_PER_NANOSECOND, (int) (TimestampType.MAX_PRECISION - precision)));
     }
 
     public static LongTimestamp longTimestamp(long epochSecond, long fractionInPicos)
@@ -649,7 +649,7 @@ public final class DateTimes
         checkArgument(precision <= TimestampWithTimeZoneType.MAX_PRECISION, "Precision is out of range");
 
         long epochMilli = start.toEpochMilli();
-        int picosOfMilli = (int) round((start.getNano() % NANOSECONDS_PER_MILLISECOND) * PICOSECONDS_PER_NANOSECOND, (int) (TimestampWithTimeZoneType.MAX_PRECISION - precision));
+        int picosOfMilli = (int) round((start.getNano() % NANOSECONDS_PER_MILLISECOND) * (long) PICOSECONDS_PER_NANOSECOND, (int) (TimestampWithTimeZoneType.MAX_PRECISION - precision));
         if (picosOfMilli == PICOSECONDS_PER_MILLISECOND) {
             epochMilli++;
             picosOfMilli = 0;

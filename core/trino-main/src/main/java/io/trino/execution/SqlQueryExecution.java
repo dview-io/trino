@@ -14,6 +14,8 @@
 package io.trino.execution;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.errorprone.annotations.ThreadSafe;
+import com.google.inject.Inject;
 import io.airlift.concurrent.SetThreadName;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
@@ -70,9 +72,6 @@ import io.trino.sql.tree.ExplainAnalyze;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.Statement;
 import org.joda.time.DateTime;
-
-import javax.annotation.concurrent.ThreadSafe;
-import javax.inject.Inject;
 
 import java.util.Collection;
 import java.util.List;
@@ -566,6 +565,11 @@ public class SqlQueryExecution
         }
 
         queryScheduler.set(scheduler);
+        stateMachine.addQueryInfoStateChangeListener(queryInfo -> {
+            if (queryInfo.isFinalQueryInfo()) {
+                queryScheduler.set(null);
+            }
+        });
     }
 
     @Override
@@ -687,14 +691,7 @@ public class SqlQueryExecution
         if (scheduler != null) {
             stageInfo = Optional.ofNullable(scheduler.getStageInfo());
         }
-
-        QueryInfo queryInfo = stateMachine.updateQueryInfo(stageInfo);
-        if (queryInfo.isFinalQueryInfo()) {
-            // capture the final query state and drop reference to the scheduler
-            queryScheduler.set(null);
-        }
-
-        return queryInfo;
+        return stateMachine.updateQueryInfo(stageInfo);
     }
 
     @Override

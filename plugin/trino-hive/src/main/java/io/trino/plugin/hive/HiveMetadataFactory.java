@@ -13,6 +13,8 @@
  */
 package io.trino.plugin.hive;
 
+import com.google.common.collect.ImmutableSet;
+import com.google.inject.Inject;
 import io.airlift.concurrent.BoundedExecutor;
 import io.airlift.json.JsonCodec;
 import io.airlift.units.Duration;
@@ -30,8 +32,6 @@ import io.trino.plugin.hive.statistics.MetastoreHiveStatisticsProvider;
 import io.trino.spi.connector.MetadataProvider;
 import io.trino.spi.security.ConnectorIdentity;
 import io.trino.spi.type.TypeManager;
-
-import javax.inject.Inject;
 
 import java.util.Optional;
 import java.util.Set;
@@ -57,6 +57,7 @@ public class HiveMetadataFactory
     private final boolean hideDeltaLakeTables;
     private final long perTransactionCacheMaximumSize;
     private final HiveMetastoreFactory metastoreFactory;
+    private final Set<HiveFileWriterFactory> fileWriterFactories;
     private final TrinoFileSystemFactory fileSystemFactory;
     private final HdfsEnvironment hdfsEnvironment;
     private final HivePartitionManager partitionManager;
@@ -87,6 +88,7 @@ public class HiveMetadataFactory
             HiveConfig hiveConfig,
             HiveMetastoreConfig hiveMetastoreConfig,
             HiveMetastoreFactory metastoreFactory,
+            Set<HiveFileWriterFactory> fileWriterFactories,
             TrinoFileSystemFactory fileSystemFactory,
             HdfsEnvironment hdfsEnvironment,
             HivePartitionManager partitionManager,
@@ -109,6 +111,7 @@ public class HiveMetadataFactory
         this(
                 catalogName,
                 metastoreFactory,
+                fileWriterFactories,
                 fileSystemFactory,
                 hdfsEnvironment,
                 partitionManager,
@@ -147,6 +150,7 @@ public class HiveMetadataFactory
     public HiveMetadataFactory(
             CatalogName catalogName,
             HiveMetastoreFactory metastoreFactory,
+            Set<HiveFileWriterFactory> fileWriterFactories,
             TrinoFileSystemFactory fileSystemFactory,
             HdfsEnvironment hdfsEnvironment,
             HivePartitionManager partitionManager,
@@ -193,6 +197,7 @@ public class HiveMetadataFactory
         this.perTransactionCacheMaximumSize = perTransactionCacheMaximumSize;
 
         this.metastoreFactory = requireNonNull(metastoreFactory, "metastoreFactory is null");
+        this.fileWriterFactories = ImmutableSet.copyOf(requireNonNull(fileWriterFactories, "fileWriterFactories is null"));
         this.fileSystemFactory = requireNonNull(fileSystemFactory, "fileSystemFactory is null");
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
         this.partitionManager = requireNonNull(partitionManager, "partitionManager is null");
@@ -249,6 +254,7 @@ public class HiveMetadataFactory
                 catalogName,
                 metastore,
                 autoCommit,
+                fileWriterFactories,
                 fileSystemFactory,
                 hdfsEnvironment,
                 partitionManager,

@@ -13,6 +13,7 @@
  */
 package io.trino.plugin.hive.parquet;
 
+import com.google.inject.Inject;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
@@ -39,8 +40,6 @@ import org.joda.time.DateTimeZone;
 import org.weakref.jmx.Flatten;
 import org.weakref.jmx.Managed;
 
-import javax.inject.Inject;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
@@ -54,7 +53,6 @@ import static io.trino.parquet.writer.ParquetSchemaConverter.HIVE_PARQUET_USE_LE
 import static io.trino.plugin.hive.HiveErrorCode.HIVE_WRITER_OPEN_ERROR;
 import static io.trino.plugin.hive.HiveErrorCode.HIVE_WRITE_VALIDATION_FAILED;
 import static io.trino.plugin.hive.HiveSessionProperties.getTimestampPrecision;
-import static io.trino.plugin.hive.HiveSessionProperties.isParquetOptimizedReaderEnabled;
 import static io.trino.plugin.hive.HiveSessionProperties.isParquetOptimizedWriterValidate;
 import static io.trino.plugin.hive.util.HiveClassNames.MAPRED_PARQUET_OUTPUT_FORMAT_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnNames;
@@ -99,10 +97,6 @@ public class ParquetFileWriterFactory
             boolean useAcidSchema,
             WriterKind writerKind)
     {
-        if (!HiveSessionProperties.isParquetOptimizedWriterEnabled(session)) {
-            return Optional.empty();
-        }
-
         if (!MAPRED_PARQUET_OUTPUT_FORMAT_CLASS.equals(storageFormat.getOutputFormat())) {
             return Optional.empty();
         }
@@ -157,7 +151,6 @@ public class ParquetFileWriterFactory
                     fileInputColumnIndexes,
                     compressionCodec.getParquetCompressionCodec(),
                     nodeVersion.toString(),
-                    isParquetOptimizedReaderEnabled(session),
                     Optional.of(parquetTimeZone),
                     validationInputFactory));
         }

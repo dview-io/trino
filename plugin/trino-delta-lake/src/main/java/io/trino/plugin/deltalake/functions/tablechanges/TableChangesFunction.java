@@ -27,13 +27,12 @@ import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
-import io.trino.spi.function.SchemaFunctionName;
-import io.trino.spi.ptf.AbstractConnectorTableFunction;
-import io.trino.spi.ptf.Argument;
-import io.trino.spi.ptf.Descriptor;
-import io.trino.spi.ptf.ScalarArgument;
-import io.trino.spi.ptf.ScalarArgumentSpecification;
-import io.trino.spi.ptf.TableFunctionAnalysis;
+import io.trino.spi.function.table.AbstractConnectorTableFunction;
+import io.trino.spi.function.table.Argument;
+import io.trino.spi.function.table.Descriptor;
+import io.trino.spi.function.table.ScalarArgument;
+import io.trino.spi.function.table.ScalarArgumentSpecification;
+import io.trino.spi.function.table.TableFunctionAnalysis;
 
 import java.util.List;
 import java.util.Map;
@@ -44,11 +43,12 @@ import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.plugin.base.util.Functions.checkFunctionArgument;
 import static io.trino.plugin.deltalake.DeltaLakeColumnType.SYNTHESIZED;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
-import static io.trino.spi.ptf.ReturnTypeSpecification.GenericTable.GENERIC_TABLE;
+import static io.trino.spi.function.table.ReturnTypeSpecification.GenericTable.GENERIC_TABLE;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static java.lang.String.format;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 public class TableChangesFunction
@@ -56,7 +56,6 @@ public class TableChangesFunction
 {
     private static final String SCHEMA_NAME = "system";
     private static final String NAME = "table_changes";
-    public static final SchemaFunctionName TABLE_CHANGES_NAME = new SchemaFunctionName(SCHEMA_NAME, NAME);
     public static final String SCHEMA_NAME_ARGUMENT = "SCHEMA_NAME";
     private static final String TABLE_NAME_ARGUMENT = "TABLE_NAME";
     private static final String SINCE_VERSION_ARGUMENT = "SINCE_VERSION";
@@ -124,7 +123,8 @@ public class TableChangesFunction
                 .filter(column -> column.getColumnType() != SYNTHESIZED)
                 .collect(toImmutableList());
         accessControl.checkCanSelectFromColumns(null, schemaTableName, columnHandles.stream()
-                .map(DeltaLakeColumnHandle::getColumnName)
+                // Lowercase column names because users don't know the original names
+                .map(column -> column.getColumnName().toLowerCase(ENGLISH))
                 .collect(toImmutableSet()));
 
         ImmutableList.Builder<Descriptor.Field> outputFields = ImmutableList.builder();

@@ -15,8 +15,7 @@
 package io.trino.spi.block;
 
 import io.trino.spi.type.MapType;
-
-import javax.annotation.Nullable;
+import jakarta.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
@@ -147,7 +146,7 @@ public abstract class AbstractMapBlock
                 newOffsets,
                 newKeys,
                 newValues,
-                new MapHashTables(mapType, Optional.ofNullable(newRawHashTables)));
+                new MapHashTables(mapType, length, Optional.ofNullable(newRawHashTables)));
     }
 
     @Override
@@ -275,7 +274,7 @@ public abstract class AbstractMapBlock
                 newOffsets,
                 newKeys,
                 newValues,
-                new MapHashTables(mapType, Optional.ofNullable(newRawHashTables)));
+                new MapHashTables(mapType, length, Optional.ofNullable(newRawHashTables)));
     }
 
     @Override
@@ -318,7 +317,7 @@ public abstract class AbstractMapBlock
                 new int[] {0, valueLength},
                 newKeys,
                 newValues,
-                new MapHashTables(mapType, Optional.ofNullable(newRawHashTables)));
+                new MapHashTables(mapType, 1, Optional.ofNullable(newRawHashTables)));
     }
 
     @Override
