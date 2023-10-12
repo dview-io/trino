@@ -5,7 +5,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-cp
 docker stop trino
 docker rm trino
 docker run --name trino -d -p 8080:8080\

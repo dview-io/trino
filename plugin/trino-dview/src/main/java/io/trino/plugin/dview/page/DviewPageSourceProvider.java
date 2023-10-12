@@ -260,7 +260,7 @@ public class DviewPageSourceProvider
                     continue;
                 }
                 if (column.getColumnName().equals("dt") && partitionDate != null) {
-                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), partitionDate.getTime() / (1000 * 60)));
+                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), (partitionDate.getTime() / (1000 * 60))));
                 }
                 if (column.getColumnName().equals("hour")) {
                     pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), partitionTime.getTime()));
