@@ -588,6 +588,12 @@ public class TestIcebergMetadataFileOperations
                         .addCopies(new FileOperation(METADATA_JSON, INPUT_FILE_NEW_STREAM), tables * 2)
                         .build());
 
+        // Bulk retrieval for two schemas
+        assertFileSystemAccesses(session, "SELECT * FROM system.metadata.table_comments WHERE schema_name IN (CURRENT_SCHEMA, 'non_existent') AND table_name LIKE 'test_select_s_m_t_comments%'",
+                ImmutableMultiset.<FileOperation>builder()
+                        .addCopies(new FileOperation(METADATA_JSON, INPUT_FILE_NEW_STREAM), tables * 2)
+                        .build());
+
         // Pointed lookup
         assertFileSystemAccesses(session, "SELECT * FROM system.metadata.table_comments WHERE schema_name = CURRENT_SCHEMA AND table_name = 'test_select_s_m_t_comments0'",
                 ImmutableMultiset.<FileOperation>builder()
@@ -608,6 +614,12 @@ public class TestIcebergMetadataFileOperations
                 {MAX_PREFIXES_COUNT},
                 {MAX_PREFIXES_COUNT + 3},
         };
+    }
+
+    @Test
+    public void testShowTables()
+    {
+        assertFileSystemAccesses("SHOW TABLES", ImmutableMultiset.of());
     }
 
     private void assertFileSystemAccesses(@Language("SQL") String query, Multiset<FileOperation> expectedAccesses)
