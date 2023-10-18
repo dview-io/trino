@@ -36,6 +36,7 @@ public class DviewTableHandle
     private final String cloudProvider;
     private final List<DviewColumn> columns;
     private final Map<String, Object> configurations;
+    private final long entityId;
 
     @JsonCreator
     public DviewTableHandle(
@@ -44,7 +45,8 @@ public class DviewTableHandle
             @JsonProperty("entity") Entity entity,
             @JsonProperty("entitySchema") EntitySchema entitySchema,
             @JsonProperty("columns") List<DviewColumn> columns,
-            @JsonProperty("configurations") Map<String, Object> configurations)
+            @JsonProperty("configurations") Map<String, Object> configurations,
+            @JsonProperty("entityId") long entityId)
     {
         this.schemaName = requireNonNull(schemaName, "schemaName is null");
         this.entity = requireNonNull(entity, "entity is null");
@@ -52,6 +54,7 @@ public class DviewTableHandle
         this.cloudProvider = requireNonNull(cloudProvider, "CloudProvider can't be null");
         this.columns = requireNonNull(columns, "No Columns provided null");
         this.configurations = requireNonNull(configurations, "No Configurations provided");
+        this.entityId = entityId;
     }
 
     @JsonProperty
@@ -76,6 +79,12 @@ public class DviewTableHandle
     public EntitySchema getEntitySchema()
     {
         return entitySchema;
+    }
+
+    @JsonProperty
+    public long getEntityId()
+    {
+        return entityId;
     }
 
     public SchemaTableName toSchemaTableName()
@@ -126,12 +135,13 @@ public class DviewTableHandle
     public String toString()
     {
         return "DviewTableHandle{" +
-                "schemaName='" + schemaName + '\'' +
-                ", entity=" + entity +
-                ", entitySchema=" + entitySchema +
-                ", cloudProvider='" + cloudProvider + '\'' +
-                ", columns=" + columns +
-                ", configurations=" + configurations +
+                "schemaName='" + getSchemaName() + '\'' +
+                ", entity=" + getEntity() +
+                ", entitySchema=" + getEntitySchema() +
+                ", cloudProvider='" + getCloudProvider() + '\'' +
+                ", columns=" + getColumns() +
+                ", configurations=" + getConfigurations() +
+                ", entityId=" + getEntityId() +
                 '}';
     }
 }

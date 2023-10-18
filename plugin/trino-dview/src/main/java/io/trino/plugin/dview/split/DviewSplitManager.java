@@ -54,11 +54,6 @@ public class DviewSplitManager
             Constraint constraint)
     {
         DviewTableHandle dviewTableHandle = (DviewTableHandle) connectorTableHandle;
-//        System.out.println("Partition Query: " + arrowTableHandle.getPartitionQuery());
-//        System.out.println("getCurrentPredicate: " + dynamicFilter.getCurrentPredicate());
-//        System.out.println("simplify: " + dynamicFilter.getCurrentPredicate().simplify().toString());
-//        System.out.println("getColumnsCovered: " + dynamicFilter.getColumnsCovered());
-//        System.out.println("getDomains: " + dynamicFilter.getCurrentPredicate().getDomains());
         List<HostAddress> addresses = nodeManager.getRequiredWorkerNodes().stream().map(Node::getHostAndPort).toList();
         List<Segment> segments = client.getDocumentContract().getSegments(dviewTableHandle.getEntity());
         List<DviewSplit> splits = segments.stream()
@@ -66,11 +61,19 @@ public class DviewSplitManager
                         new DviewSplit(addresses, document.getPath(), segment.getDateValue().toString(), segment.getTimeValue() != null ? segment.getTimeValue().toString() : null)
                 ).toList().stream()))
                 .collect(Collectors.toList());
+//        DviewColumnHandle dataVersionColumn = new DviewColumnHandle("dpt_data_version", IntegerType.INTEGER, 0, false, 1);
+//        if (constraint.getPredicateColumns().isEmpty()) {
+//            Set<ColumnHandle> predicateColumns  = new HashSet<>();
+//            predicateColumns.add(new DviewColumnHandle("dpt_data_version", IntegerType.INTEGER, 0, false,1));
+//        }
+//        else {
+//            constraint.getPredicateColumns().get().add();
+//        }
+        System.out.println("splits: " + splits);
 
 //        List<DviewSplit> testSplits = segments.stream()
 //                .map(segment -> new DviewSplit(addresses, dviewTableHandle.getEntity().getId(), dviewTableHandle.getEntity().getName()))
 //                .collect(Collectors.toList());
-        System.out.println("Splits:" + splits);
         return new FixedSplitSource(splits);
     }
 }

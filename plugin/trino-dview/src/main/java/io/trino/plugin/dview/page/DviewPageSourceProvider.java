@@ -24,16 +24,12 @@ import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.filesystem.TrinoInputFile;
 import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
-import io.trino.hdfs.ConfigurationInitializer;
 import io.trino.hdfs.DynamicHdfsConfiguration;
 import io.trino.hdfs.HdfsConfig;
 import io.trino.hdfs.HdfsConfigurationInitializer;
 import io.trino.hdfs.HdfsEnvironment;
 import io.trino.hdfs.TrinoHdfsFileSystemStats;
 import io.trino.hdfs.authentication.NoHdfsAuthentication;
-import io.trino.hdfs.s3.HiveS3Config;
-import io.trino.hdfs.s3.TrinoS3ConfigurationInitializer;
-import io.trino.memory.context.AggregatedMemoryContext;
 import io.trino.orc.OrcReaderOptions;
 import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.Field;
@@ -45,9 +41,11 @@ import io.trino.parquet.predicate.TupleDomainParquetPredicate;
 import io.trino.parquet.reader.MetadataReader;
 import io.trino.parquet.reader.ParquetReader;
 import io.trino.parquet.reader.TrinoColumnIndexStore;
+import io.trino.plugin.dview.client.DviewClient;
 import io.trino.plugin.dview.split.DviewSplit;
 import io.trino.plugin.dview.table.DviewTableHandle;
 import io.trino.plugin.dview.table.column.DviewColumnHandle;
+import io.trino.plugin.dview.utils.FileUtils;
 import io.trino.plugin.hive.FileFormatDataSourceStats;
 import io.trino.plugin.hive.HiveColumnHandle;
 import io.trino.plugin.hive.HiveColumnProjectionInfo;
@@ -67,7 +65,6 @@ import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.TypeManager;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
@@ -127,34 +124,16 @@ public class DviewPageSourceProvider
             -1,
             false,
             null);
-    private final TrinoFileSystemFactory fileSystemFactory;
+    private final DviewClient dviewClient;
     private final FileFormatDataSourceStats fileFormatDataSourceStats;
     private final OrcReaderOptions orcReaderOptions;
     private final ParquetReaderOptions parquetReaderOptions;
     private final TypeManager typeManager;
 
     @Inject
-    public DviewPageSourceProvider(FileFormatDataSourceStats fileFormatDataSourceStats, TypeManager typeManager)
+    public DviewPageSourceProvider(DviewClient dviewClient, FileFormatDataSourceStats fileFormatDataSourceStats, TypeManager typeManager)
     {
-        ConfigurationInitializer localHostConfig = new ConfigurationInitializer()
-        {
-            @Override
-            public void initializeConfiguration(Configuration config)
-            {
-                config.set("fs.file.impl", org.apache.hadoop.fs.LocalFileSystem.class.getName());
-                config.set("fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
-            }
-        };
-        this.fileSystemFactory = new HdfsFileSystemFactory(new HdfsEnvironment(
-                    new DynamicHdfsConfiguration(
-                        new HdfsConfigurationInitializer(
-                                new HdfsConfig(),
-                                Set.of(new TrinoS3ConfigurationInitializer(new HiveS3Config().setS3PathStyleAccess(true)),
-                                        localHostConfig)),
-                        ImmutableSet.of()),
-                new HdfsConfig(),
-                new NoHdfsAuthentication()),
-                new TrinoHdfsFileSystemStats());
+        this.dviewClient = dviewClient;
         this.fileFormatDataSourceStats = fileFormatDataSourceStats;
         this.orcReaderOptions = new OrcReaderOptions();
         this.parquetReaderOptions = new ParquetReaderOptions();
@@ -167,10 +146,22 @@ public class DviewPageSourceProvider
         DviewSplit dviewSplit = (DviewSplit) split;
         DviewTableHandle dviewTableHandle = (DviewTableHandle) table;
         List<DviewColumnHandle> columnHandles = columns.stream().map(DviewColumnHandle.class::cast).toList();
+        TrinoFileSystemFactory fileSystemFactory = new HdfsFileSystemFactory(
+                new HdfsEnvironment(
+                        new DynamicHdfsConfiguration(
+                                new HdfsConfigurationInitializer(
+                                        new HdfsConfig(),
+                                        Set.of(FileUtils.getConfigurationInitializerForCloudProvider(dviewSplit.getFilePath(), dviewClient.getCloudProviderFor(dviewTableHandle.getEntityId())))),
+                                ImmutableSet.of()),
+                        new HdfsConfig(),
+                        new NoHdfsAuthentication()),
+                new TrinoHdfsFileSystemStats());
         TrinoFileSystem fileSystem = fileSystemFactory.create(session);
+
         TrinoInputFile inputFile = fileSystem.newInputFile(Location.of(dviewSplit.getFilePath()));
         int start = 0;
         TupleDomain<DviewColumnHandle> effectivePredicate = dynamicFilter.getCurrentPredicate().transformKeys(DviewColumnHandle.class::cast);
+        System.out.println("getCurrentPredicate:" + dynamicFilter.getCurrentPredicate());
         ParquetDataSource dataSource = null;
         Time partitionTime = null;
         Date partitionDate = null;
@@ -180,7 +171,6 @@ public class DviewPageSourceProvider
         if (dviewSplit.getPartitionDate() != null) {
             partitionDate = Date.valueOf(dviewSplit.getPartitionDate());
         }
-        AggregatedMemoryContext memoryContext = newSimpleAggregatedMemoryContext();
         boolean useColumnNames = false;
         DateTimeZone dateTimeZone = UTC;
         int domainCompactionThreshold = 100;
@@ -189,9 +179,7 @@ public class DviewPageSourceProvider
             dataSource = new TrinoParquetDataSource(inputFile, parquetReaderOptions, fileFormatDataSourceStats);
             ParquetMetadata parquetMetadata = MetadataReader.readFooter(dataSource, Optional.empty());
             FileMetaData fileMetaData = parquetMetadata.getFileMetaData();
-            System.out.println("fileMetaData: " + fileMetaData);
             MessageType fileSchema = fileMetaData.getSchema();
-            System.out.println("fileSchema: " + fileSchema);
             Optional<MessageType> message = getParquetMessageType(columnHandles, useColumnNames, fileSchema);
             MessageType requestedSchema = message.orElse(new MessageType(fileSchema.getName(), ImmutableList.of()));
             MessageColumnIO messageColumn = getColumnIO(fileSchema, requestedSchema);
@@ -237,7 +225,38 @@ public class DviewPageSourceProvider
                     .orElse(columnHandles);
             ParquetDataSource finalDataSource = dataSource;
             ParquetDataSourceId dataSourceId = dataSource.getId();
-
+            ParquetPageSource.Builder pageSourceBuilder = ParquetPageSource.builder();
+            ImmutableList.Builder<Field> parquetColumnFieldsBuilder = ImmutableList.builder();
+            int sourceChannel = 0;
+            for (DviewColumnHandle column : baseColumns) {
+                if (Objects.equals(column.getColumnName(), PARQUET_ROW_INDEX_COLUMN.getColumnName())) {
+                    pageSourceBuilder.addRowIndexColumn();
+                }
+                else if (column.getColumnName().equals("dt") && partitionDate != null) {
+                    System.out.println("type : " + column.getColumnType());
+                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), partitionDate.getTime() / 86400000));
+                }
+                else if (column.getColumnName().equals("hour") && partitionTime != null) {
+                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), partitionTime.getTime()));
+                }
+                else {
+                    Optional<org.apache.parquet.schema.Type> parquetType = getBaseColumnParquetType(column, fileSchema, useColumnNames);
+                    if (parquetType.isEmpty()) {
+                        pageSourceBuilder.addNullColumn(column.getColumnType());
+                        continue;
+                    }
+                    String columnName = useColumnNames ? column.getColumnName() : fileSchema.getFields().get(column.getOrdinalPosition()).getName();
+                    Optional<Field> field = constructField(column.getColumnType(), lookupColumnByName(messageColumn, columnName));
+                    if (field.isEmpty()) {
+                        pageSourceBuilder.addNullColumn(column.getColumnType());
+                        continue;
+                    }
+                    parquetColumnFieldsBuilder.add(field.get());
+                    pageSourceBuilder.addSourceColumn(sourceChannel);
+                    sourceChannel++;
+                }
+            }
+//            ConnectorPageSource connectorPageSource = pageSourceBuilder.build(parquetReaderProvider.createParquetReader(parquetColumnFieldsBuilder.build()));
             ParquetPageSourceFactory.ParquetReaderProvider parquetReaderProvider = fields -> new ParquetReader(
                     Optional.ofNullable(fileMetaData.getCreatedBy()),
                     fields,
@@ -251,35 +270,6 @@ public class DviewPageSourceProvider
                     Optional.of(parquetPredicate),
                     columnIndexes.build(),
                     Optional.empty());
-            ParquetPageSource.Builder pageSourceBuilder = ParquetPageSource.builder();
-            ImmutableList.Builder<Field> parquetColumnFieldsBuilder = ImmutableList.builder();
-            int sourceChannel = 0;
-            for (DviewColumnHandle column : baseColumns) {
-                if (Objects.equals(column.getColumnName(), PARQUET_ROW_INDEX_COLUMN.getColumnName())) {
-                    pageSourceBuilder.addRowIndexColumn();
-                    continue;
-                }
-                if (column.getColumnName().equals("dt") && partitionDate != null) {
-                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), (partitionDate.getTime() / (1000 * 60))));
-                }
-                if (column.getColumnName().equals("hour")) {
-                    pageSourceBuilder.addConstantColumn(nativeValueToBlock(column.getColumnType(), partitionTime.getTime()));
-                }
-                Optional<org.apache.parquet.schema.Type> parquetType = getBaseColumnParquetType(column, fileSchema, useColumnNames);
-                if (parquetType.isEmpty()) {
-                    pageSourceBuilder.addNullColumn(column.getColumnType());
-                    continue;
-                }
-                String columnName = useColumnNames ? column.getColumnName() : fileSchema.getFields().get(column.getOrdinalPosition()).getName();
-                Optional<Field> field = constructField(column.getColumnType(), lookupColumnByName(messageColumn, columnName));
-                if (field.isEmpty()) {
-                    pageSourceBuilder.addNullColumn(column.getColumnType());
-                    continue;
-                }
-                parquetColumnFieldsBuilder.add(field.get());
-                pageSourceBuilder.addSourceColumn(sourceChannel);
-                sourceChannel++;
-            }
             return pageSourceBuilder.build(parquetReaderProvider.createParquetReader(parquetColumnFieldsBuilder.build()));
         }
         catch (IOException | RuntimeException e) {
@@ -466,6 +456,7 @@ public class DviewPageSourceProvider
         if (exception instanceof ParquetCorruptionException) {
             return new TrinoException(DVIEW_BAD_DATA, exception);
         }
+        System.out.println(Arrays.toString(exception.getStackTrace()));
         return new TrinoException(DVIEW_CURSOR_ERROR, format("Failed to read Parquet file: %s", dataSourceId), exception);
     }
 

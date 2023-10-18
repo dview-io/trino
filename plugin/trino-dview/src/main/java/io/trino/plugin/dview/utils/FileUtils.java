@@ -13,11 +13,10 @@
  */
 package io.trino.plugin.dview.utils;
 
-//import io.trino.hdfs.s3.TrinoS3FileSystem;
-//import org.apache.hadoop.conf.Configuration;
-//import org.apache.hadoop.fs.FileSystem;
-
-//import java.io.IOException;
+import io.dview.schema.fortress.models.schema.meta.CloudProvider;
+import io.trino.hdfs.ConfigurationInitializer;
+import io.trino.hdfs.s3.HiveS3Config;
+import io.trino.hdfs.s3.TrinoS3ConfigurationInitializer;
 
 public class FileUtils
 {
@@ -25,12 +24,51 @@ public class FileUtils
     {
     }
 
-//    public static FileSystem getFileSystemForEntity(Entity entity, Document document, Configuration configuration)
-//            throws IOException
-//    {
-//        switch (entity.getCloudProvider().getName()) {
-//            case S3 : return new TrinoS3FileSystem();
-//            default: return FileSystem.newInstance(configuration);
-//        }
-//    }
+    public static ConfigurationInitializer getConfigurationInitializerForCloudProvider(String storagePath, CloudProvider cloudProvider)
+    {
+        System.out.println(cloudProvider);
+        switch (cloudProvider.getName()) {
+            case S3:
+                HiveS3Config hiveS3Config = new HiveS3Config();
+                hiveS3Config.setS3AwsAccessKey(System.getenv("accessKey"));
+                hiveS3Config.setS3AwsSecretKey(System.getenv("secretKey"));
+                hiveS3Config.setS3Region(cloudProvider.getRegion());
+//                hiveS3Config.setS3SslEnabled(true);
+//                hiveS3Config.setS3PathStyleAccess(true);
+                return new TrinoS3ConfigurationInitializer(hiveS3Config);
+            default: return config -> cloudProvider.getConfigs().forEach((key, value) -> config.set(key, extractConfigValue(value.toString())));
+        }
+    }
+
+    /**
+     * Extracts and resolves the value of a configuration string that may contain references to
+     * environment variables. If the input string starts with "${" and ends with "}", it is considered
+     * a reference to an environment variable. The method attempts to fetch the environment variable's
+     * value and replace the input string with that value. If the environment variable is not found,
+     * it throws a {@link RuntimeException} with an error message indicating the missing variable.
+     *
+     * @param configValue The configuration string that may contain references to environment variables.
+     * @return The resolved configuration value, either the environment variable's value or the original input string.
+     * @throws RuntimeException If the referenced environment variable is not found.
+     */
+    public static String extractConfigValue(String configValue)
+    {
+        if (configValue.startsWith("${") && configValue.endsWith("}")) {
+            // Extract the environment variable name between "${" and "}"
+            String envVarName = configValue.substring(2, configValue.length() - 1);
+
+            // Fetch the environment variable value
+            String envVarValue = System.getenv(envVarName);
+
+            if (envVarValue != null) {
+                // Replace the input with the environment variable value
+                configValue = envVarValue;
+            }
+            else {
+                // Handle the case where the environment variable is not found
+                throw new RuntimeException("Environment variable not found: " + envVarName);
+            }
+        }
+        return configValue;
+    }
 }

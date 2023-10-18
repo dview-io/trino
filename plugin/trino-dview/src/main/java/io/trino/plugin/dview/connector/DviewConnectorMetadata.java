@@ -94,7 +94,7 @@ public class DviewConnectorMetadata
         if (table == null) {
             return null;
         }
-        return new DviewTableHandle(tableName.getSchemaName(), table.getEntity().getCloudProvider().getName().toString(), table.getEntity(), table.getEntitySchema(), table.getColumns(), table.getEntity().getCloudProvider().getConfigs());
+        return new DviewTableHandle(tableName.getSchemaName(), table.getEntity().getCloudProvider().getName().toString(), table.getEntity(), table.getEntitySchema(), table.getColumns(), table.getEntity().getCloudProvider().getConfigs(), table.getEntityId());
     }
 
     @Override

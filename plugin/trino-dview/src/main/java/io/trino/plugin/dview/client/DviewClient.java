@@ -28,6 +28,7 @@ import io.dview.schema.fortress.models.schema.Catalog;
 import io.dview.schema.fortress.models.schema.Namespace;
 import io.dview.schema.fortress.models.schema.Tenant;
 import io.dview.schema.fortress.models.schema.entity.Entity;
+import io.dview.schema.fortress.models.schema.meta.CloudProvider;
 import io.trino.plugin.dview.DviewConfig;
 import io.trino.plugin.dview.table.DviewTable;
 
@@ -150,5 +151,11 @@ public class DviewClient
             log.error("Namespace not found with tenant {0} and name {1}", tenant.getName(), name);
             throw fortressClientNotFound;
         }
+    }
+
+    public CloudProvider getCloudProviderFor(long entityId)
+    {
+        Entity entity = Entity.builder().id(entityId).build();
+        return client.getEntityContract().getCloudProviderFor(entity);
     }
 }

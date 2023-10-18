@@ -35,6 +35,7 @@ public class DviewTable
     private final List<DviewColumn> columns;
     private final List<ColumnMetadata> columnsMetadata;
     private final Entity entity;
+    private final long entityId;
     private final EntitySchema entitySchema;
 
     @JsonCreator
@@ -58,6 +59,7 @@ public class DviewTable
         this.columnsMetadata = columnsMetadata.build();
         this.entity = entity;
         this.entitySchema = entitySchema;
+        this.entityId = entity.getId();
     }
 
     @JsonProperty
@@ -82,6 +84,12 @@ public class DviewTable
     public Entity getEntity()
     {
         return entity;
+    }
+
+    @JsonProperty
+    public long getEntityId()
+    {
+        return entityId;
     }
 
     @JsonProperty
