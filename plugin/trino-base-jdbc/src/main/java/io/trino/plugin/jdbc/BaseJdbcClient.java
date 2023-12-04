@@ -114,6 +114,7 @@ public abstract class BaseJdbcClient
     private final IdentifierMapping identifierMapping;
     private final boolean supportsRetries;
     private final JdbcRemoteIdentifiersFactory jdbcRemoteIdentifiersFactory = new JdbcRemoteIdentifiersFactory(this);
+    private Integer maxColumnNameLength;
 
     public BaseJdbcClient(
             String identifierQuote,
@@ -304,7 +305,7 @@ public abstract class BaseJdbcClient
             List<JdbcColumnHandle> columns = new ArrayList<>();
             while (resultSet.next()) {
                 // skip if table doesn't match expected
-                if (!(Objects.equals(remoteTableName, getRemoteTable(resultSet)))) {
+                if (!Objects.equals(remoteTableName, getRemoteTable(resultSet))) {
                     continue;
                 }
                 allColumns++;
@@ -879,7 +880,7 @@ public abstract class BaseJdbcClient
                 quoted(catalogName, newRemoteSchemaName, newRemoteTableName)));
     }
 
-    private RemoteTableName constructPageSinkIdsTable(ConnectorSession session, Connection connection, JdbcOutputTableHandle handle, Set<Long> pageSinkIds)
+    private RemoteTableName constructPageSinkIdsTable(ConnectorSession session, Connection connection, JdbcOutputTableHandle handle, Set<Long> pageSinkIds, Closer closer)
             throws SQLException
     {
         verify(handle.getPageSinkIdColumnName().isPresent(), "Output table handle's pageSinkIdColumn is empty");
@@ -903,6 +904,7 @@ public abstract class BaseJdbcClient
         LongWriteFunction pageSinkIdWriter = (LongWriteFunction) toWriteMapping(session, TRINO_PAGE_SINK_ID_COLUMN_TYPE).getWriteFunction();
 
         execute(session, connection, pageSinkTableSql);
+        closer.register(() -> dropTable(session, pageSinkTable, true));
 
         try (PreparedStatement statement = connection.prepareStatement(pageSinkInsertSql)) {
             int batchSize = 0;
@@ -959,8 +961,7 @@ public abstract class BaseJdbcClient
                     quoted(temporaryTable));
 
             if (handle.getPageSinkIdColumnName().isPresent()) {
-                RemoteTableName pageSinkTable = constructPageSinkIdsTable(session, connection, handle, pageSinkIds);
-                closer.register(() -> dropTable(session, pageSinkTable, true));
+                RemoteTableName pageSinkTable = constructPageSinkIdsTable(session, connection, handle, pageSinkIds, closer);
 
                 insertSql += format(" WHERE EXISTS (SELECT 1 FROM %s page_sink_table WHERE page_sink_table.%s = temp_table.%s)",
                         quoted(pageSinkTable),
@@ -1433,6 +1434,26 @@ public abstract class BaseJdbcClient
     public OptionalInt getMaxWriteParallelism(ConnectorSession session)
     {
         return OptionalInt.of(getWriteParallelism(session));
+    }
+
+    protected OptionalInt getMaxColumnNameLengthFromDatabaseMetaData(ConnectorSession session)
+    {
+        if (maxColumnNameLength != null) {
+            // According to JavaDoc of DatabaseMetaData#getMaxColumnNameLength a value of 0 signifies that the limit is unknown
+            if (maxColumnNameLength == 0) {
+                return OptionalInt.empty();
+            }
+
+            return OptionalInt.of(maxColumnNameLength);
+        }
+
+        try (Connection connection = connectionFactory.openConnection(session)) {
+            maxColumnNameLength = connection.getMetaData().getMaxColumnNameLength();
+            return OptionalInt.of(maxColumnNameLength);
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
     }
 
     protected void verifySchemaName(DatabaseMetaData databaseMetadata, String schemaName)

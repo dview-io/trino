@@ -170,7 +170,7 @@ public class TestAccessControl
                     }
                     return new MockConnectorTableHandle(schemaTableName);
                 })
-                .withListSchemaNames((connectorSession -> ImmutableList.of(DEFAULT_SCHEMA)))
+                .withListSchemaNames(connectorSession -> ImmutableList.of(DEFAULT_SCHEMA))
                 .withListTables((connectorSession, schemaName) -> {
                     if (schemaName.equals(DEFAULT_SCHEMA)) {
                         return ImmutableList.of(REDIRECTED_SOURCE);
@@ -210,7 +210,7 @@ public class TestAccessControl
                                 Optional.empty(),
                                 Optional.empty(),
                                 Optional.empty(),
-                                ImmutableList.of(new ConnectorMaterializedViewDefinition.Column("test", BIGINT.getTypeId())),
+                                ImmutableList.of(new ConnectorMaterializedViewDefinition.Column("test", BIGINT.getTypeId(), Optional.empty())),
                                 Optional.of(Duration.ZERO),
                                 Optional.of("comment"),
                                 Optional.of("owner"),
@@ -236,19 +236,19 @@ public class TestAccessControl
                 .withColumnProperties(() -> ImmutableList.of(
                         integerProperty("another_property", "description", 0, false),
                         stringProperty("string_column_property", "description", "", false)))
-                .withRedirectTable(((connectorSession, schemaTableName) -> {
+                .withRedirectTable((connectorSession, schemaTableName) -> {
                     if (schemaTableName.equals(SchemaTableName.schemaTableName(DEFAULT_SCHEMA, REDIRECTED_SOURCE))) {
                         return Optional.of(
                                 new CatalogSchemaTableName("mock", SchemaTableName.schemaTableName(DEFAULT_SCHEMA, REDIRECTED_TARGET)));
                     }
                     return Optional.empty();
-                }))
-                .withGetComment((schemaTableName -> {
+                })
+                .withGetComment(schemaTableName -> {
                     if (schemaTableName.getTableName().equals(REDIRECTED_TARGET)) {
                         return Optional.of("this is a redirected table");
                     }
                     return Optional.empty();
-                }))
+                })
                 .withFunctions(ImmutableList.<FunctionMetadata>builder()
                         .add(FunctionMetadata.scalarBuilder("my_function")
                                 .signature(Signature.builder().argumentType(BIGINT).returnType(BIGINT).build())
@@ -348,6 +348,8 @@ public class TestAccessControl
         assertAccessAllowed("SHOW CREATE TABLE lineitem", privilege("orders", SHOW_CREATE_TABLE));
         assertAccessDenied("SELECT my_function(1)", "Cannot execute function my_function", privilege("mock.function.my_function", EXECUTE_FUNCTION));
         assertAccessAllowed("SELECT my_function(1)", privilege("max", EXECUTE_FUNCTION));
+        assertAccessAllowed("SELECT abs(-10)", privilege("abs", EXECUTE_FUNCTION));
+        assertAccessAllowed("SELECT abs(-10)", privilege("system.builtin.abs", EXECUTE_FUNCTION));
         assertAccessAllowed("SHOW STATS FOR lineitem");
         assertAccessAllowed("SHOW STATS FOR lineitem", privilege("orders", SELECT_COLUMN));
         assertAccessAllowed("SHOW STATS FOR (SELECT * FROM lineitem)");
@@ -608,9 +610,10 @@ public class TestAccessControl
                 "Cannot execute function my_function",
                 new TestingPrivilege(Optional.empty(), "mock.function.my_function", EXECUTE_FUNCTION));
 
-        // builtin functions are always allowed, and there are no security checks
+        // inline and builtin functions are always allowed, and there are no security checks
         TestingPrivilege denyAllFunctionCalls = new TestingPrivilege(Optional.empty(), name -> true, EXECUTE_FUNCTION);
         assertAccessAllowed("SELECT abs(42)", denyAllFunctionCalls);
+        assertAccessAllowed("WITH FUNCTION foo() RETURNS int RETURN 42 SELECT foo()", denyAllFunctionCalls);
         assertAccessDenied("SELECT my_function(42)", "Cannot execute function my_function", denyAllFunctionCalls);
 
         TestingPrivilege denyNonMyFunctionCalls = new TestingPrivilege(Optional.empty(), name -> !name.equals("mock.function.my_function"), EXECUTE_FUNCTION);

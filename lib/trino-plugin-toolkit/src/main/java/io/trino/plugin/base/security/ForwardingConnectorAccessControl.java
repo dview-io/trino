@@ -158,12 +158,6 @@ public abstract class ForwardingConnectorAccessControl
     }
 
     @Override
-    public Set<String> filterColumns(ConnectorSecurityContext context, SchemaTableName tableName, Set<String> columns)
-    {
-        return delegate().filterColumns(context, tableName, columns);
-    }
-
-    @Override
     public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
     {
         return delegate().filterColumns(context, tableColumns);
@@ -421,6 +415,18 @@ public abstract class ForwardingConnectorAccessControl
     public Set<SchemaFunctionName> filterFunctions(ConnectorSecurityContext context, Set<SchemaFunctionName> functionNames)
     {
         return delegate().filterFunctions(context, functionNames);
+    }
+
+    @Override
+    public void checkCanCreateFunction(ConnectorSecurityContext context, SchemaRoutineName function)
+    {
+        delegate().checkCanCreateFunction(context, function);
+    }
+
+    @Override
+    public void checkCanDropFunction(ConnectorSecurityContext context, SchemaRoutineName function)
+    {
+        delegate().checkCanDropFunction(context, function);
     }
 
     @Override

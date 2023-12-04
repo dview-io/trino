@@ -48,8 +48,8 @@ import static java.lang.String.format;
 public final class DeltaLakeSessionProperties
         implements SessionPropertiesProvider
 {
-    private static final String MAX_SPLIT_SIZE = "max_split_size";
-    private static final String MAX_INITIAL_SPLIT_SIZE = "max_initial_split_size";
+    public static final String MAX_SPLIT_SIZE = "max_split_size";
+    public static final String MAX_INITIAL_SPLIT_SIZE = "max_initial_split_size";
     public static final String VACUUM_MIN_RETENTION = "vacuum_min_retention";
     private static final String HIVE_CATALOG_NAME = "hive_catalog_name";
     private static final String PARQUET_MAX_READ_BLOCK_SIZE = "parquet_max_read_block_size";
@@ -67,9 +67,9 @@ public final class DeltaLakeSessionProperties
     private static final String TABLE_STATISTICS_ENABLED = "statistics_enabled";
     public static final String EXTENDED_STATISTICS_ENABLED = "extended_statistics_enabled";
     public static final String EXTENDED_STATISTICS_COLLECT_ON_WRITE = "extended_statistics_collect_on_write";
-    public static final String LEGACY_CREATE_TABLE_WITH_EXISTING_LOCATION_ENABLED = "legacy_create_table_with_existing_location_enabled";
     private static final String PROJECTION_PUSHDOWN_ENABLED = "projection_pushdown_enabled";
     private static final String QUERY_PARTITION_FILTER_REQUIRED = "query_partition_filter_required";
+    private static final String CHECKPOINT_FILTERING_ENABLED = "checkpoint_filtering_enabled";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -173,11 +173,6 @@ public final class DeltaLakeSessionProperties
                         deltaLakeConfig.isExtendedStatisticsEnabled(),
                         false),
                 booleanProperty(
-                        LEGACY_CREATE_TABLE_WITH_EXISTING_LOCATION_ENABLED,
-                        "Enable using the CREATE TABLE statement to register an existing table",
-                        deltaLakeConfig.isLegacyCreateTableWithExistingLocationEnabled(),
-                        false),
-                booleanProperty(
                         EXTENDED_STATISTICS_COLLECT_ON_WRITE,
                         "Enables automatic column level extended statistics collection on write",
                         deltaLakeConfig.isCollectExtendedStatisticsOnWrite(),
@@ -202,6 +197,11 @@ public final class DeltaLakeSessionProperties
                         QUERY_PARTITION_FILTER_REQUIRED,
                         "Require filter on partition column",
                         deltaLakeConfig.isQueryPartitionFilterRequired(),
+                        false),
+                booleanProperty(
+                        CHECKPOINT_FILTERING_ENABLED,
+                        "Use filter in checkpoint reader",
+                        deltaLakeConfig.isCheckpointPartitionFilterEnabled(),
                         false));
     }
 
@@ -281,12 +281,6 @@ public final class DeltaLakeSessionProperties
         return session.getProperty(EXTENDED_STATISTICS_ENABLED, Boolean.class);
     }
 
-    @Deprecated
-    public static boolean isLegacyCreateTableWithExistingLocationEnabled(ConnectorSession session)
-    {
-        return session.getProperty(LEGACY_CREATE_TABLE_WITH_EXISTING_LOCATION_ENABLED, Boolean.class);
-    }
-
     public static boolean isCollectExtendedStatisticsColumnStatisticsOnWrite(ConnectorSession session)
     {
         return session.getProperty(EXTENDED_STATISTICS_COLLECT_ON_WRITE, Boolean.class);
@@ -305,5 +299,10 @@ public final class DeltaLakeSessionProperties
     public static boolean isQueryPartitionFilterRequired(ConnectorSession session)
     {
         return session.getProperty(QUERY_PARTITION_FILTER_REQUIRED, Boolean.class);
+    }
+
+    public static boolean isCheckpointFilteringEnabled(ConnectorSession session)
+    {
+        return session.getProperty(CHECKPOINT_FILTERING_ENABLED, Boolean.class);
     }
 }

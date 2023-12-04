@@ -181,12 +181,6 @@ public class AllowAllAccessControl
     }
 
     @Override
-    public Set<String> filterColumns(SecurityContext context, CatalogSchemaTableName tableName, Set<String> columns)
-    {
-        return columns;
-    }
-
-    @Override
     public Map<SchemaTableName, Set<String>> filterColumns(SecurityContext context, String catalogName, Map<SchemaTableName, Set<String>> tableColumns)
     {
         return tableColumns;
@@ -403,5 +397,15 @@ public class AllowAllAccessControl
     public Set<SchemaFunctionName> filterFunctions(SecurityContext context, String catalogName, Set<SchemaFunctionName> functionNames)
     {
         return functionNames;
+    }
+
+    @Override
+    public void checkCanCreateFunction(SecurityContext context, QualifiedObjectName functionName)
+    {
+    }
+
+    @Override
+    public void checkCanDropFunction(SecurityContext context, QualifiedObjectName functionName)
+    {
     }
 }

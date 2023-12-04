@@ -21,8 +21,10 @@ import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.datatype.DataSetup;
 import io.trino.testing.datatype.SqlDataTypeTest;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -40,7 +42,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 
+@TestInstance(PER_CLASS)
+@Isolated
 public class TestDruidTypeMapping
         extends AbstractTestQueryFramework
 {
@@ -55,7 +60,7 @@ public class TestDruidTypeMapping
         return createDruidQueryRunnerTpch(druidServer, ImmutableMap.of(), ImmutableMap.of(), ImmutableList.of());
     }
 
-    @AfterClass(alwaysRun = true)
+    @AfterAll
     public void tearDown()
     {
         druidServer.close();

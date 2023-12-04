@@ -93,6 +93,7 @@ import io.trino.metadata.InMemoryNodeManager;
 import io.trino.metadata.InternalBlockEncodingSerde;
 import io.trino.metadata.InternalFunctionBundle;
 import io.trino.metadata.InternalNodeManager;
+import io.trino.metadata.LanguageFunctionManager;
 import io.trino.metadata.LiteralFunction;
 import io.trino.metadata.MaterializedViewPropertyManager;
 import io.trino.metadata.Metadata;
@@ -168,6 +169,7 @@ import io.trino.sql.gen.JoinFilterFunctionCompiler;
 import io.trino.sql.gen.OrderingCompiler;
 import io.trino.sql.gen.PageFunctionCompiler;
 import io.trino.sql.parser.SqlParser;
+import io.trino.sql.planner.CompilerConfig;
 import io.trino.sql.planner.LocalExecutionPlanner;
 import io.trino.sql.planner.LocalExecutionPlanner.LocalExecutionPlan;
 import io.trino.sql.planner.LogicalPlanner;
@@ -275,6 +277,7 @@ public class LocalQueryRunner
     private final TypeRegistry typeRegistry;
     private final GlobalFunctionCatalog globalFunctionCatalog;
     private final FunctionManager functionManager;
+    private final LanguageFunctionManager languageFunctionManager;
     private final StatsCalculator statsCalculator;
     private final ScalarStatsCalculator scalarStatsCalculator;
     private final CostCalculator costCalculator;
@@ -377,25 +380,24 @@ public class LocalQueryRunner
         this.globalFunctionCatalog = new GlobalFunctionCatalog();
         globalFunctionCatalog.addFunctions(new InternalFunctionBundle(new LiteralFunction(blockEncodingSerde)));
         globalFunctionCatalog.addFunctions(SystemFunctionBundle.create(featuresConfig, typeOperators, blockTypeOperators, nodeManager.getCurrentNode().getNodeVersion()));
+        this.groupProvider = new TestingGroupProviderManager();
+        this.languageFunctionManager = new LanguageFunctionManager(sqlParser, typeManager, groupProvider);
         Metadata metadata = metadataDecorator.apply(new MetadataManager(
                 new DisabledSystemSecurityMetadata(),
                 transactionManager,
                 globalFunctionCatalog,
+                languageFunctionManager,
                 typeManager));
         typeRegistry.addType(new JsonPath2016Type(new TypeDeserializer(typeManager), blockEncodingSerde));
         this.joinCompiler = new JoinCompiler(typeOperators);
         PageIndexerFactory pageIndexerFactory = new GroupByHashPageIndexerFactory(joinCompiler);
-        this.groupProvider = new TestingGroupProviderManager();
         this.accessControl = new TestingAccessControlManager(transactionManager, eventListenerManager);
         accessControl.loadSystemAccessControl(AllowAllSystemAccessControl.NAME, ImmutableMap.of());
-
-        HandleResolver handleResolver = new HandleResolver();
 
         NodeInfo nodeInfo = new NodeInfo("test");
         catalogFactory.setCatalogFactory(new DefaultCatalogFactory(
                 metadata,
                 accessControl,
-                handleResolver,
                 nodeManager,
                 pageSorter,
                 pageIndexerFactory,
@@ -414,7 +416,7 @@ public class LocalQueryRunner
         this.sessionPropertyManager = createSessionPropertyManager(catalogManager, extraSessionProperties, taskManagerConfig, featuresConfig, optimizerConfig);
         this.nodePartitioningManager = new NodePartitioningManager(nodeScheduler, typeOperators, createNodePartitioningProvider(catalogManager));
         TableProceduresRegistry tableProceduresRegistry = new TableProceduresRegistry(createTableProceduresProvider(catalogManager));
-        this.functionManager = new FunctionManager(createFunctionProvider(catalogManager), globalFunctionCatalog);
+        this.functionManager = new FunctionManager(createFunctionProvider(catalogManager), globalFunctionCatalog, languageFunctionManager);
         TableFunctionRegistry tableFunctionRegistry = new TableFunctionRegistry(createTableFunctionProvider(catalogManager));
         this.schemaPropertyManager = createSchemaPropertyManager(catalogManager);
         this.columnPropertyManager = createColumnPropertyManager(catalogManager);
@@ -430,7 +432,7 @@ public class LocalQueryRunner
                 new JsonValueFunction(functionManager, metadata, typeManager),
                 new JsonQueryFunction(functionManager, metadata, typeManager)));
 
-        this.plannerContext = new PlannerContext(metadata, typeOperators, blockEncodingSerde, typeManager, functionManager, tracer);
+        this.plannerContext = new PlannerContext(metadata, typeOperators, blockEncodingSerde, typeManager, functionManager, languageFunctionManager, tracer);
         this.pageFunctionCompiler = new PageFunctionCompiler(functionManager, 0);
         this.expressionCompiler = new ExpressionCompiler(functionManager, pageFunctionCompiler);
         this.joinFilterFunctionCompiler = new JoinFilterFunctionCompiler(functionManager);
@@ -454,7 +456,7 @@ public class LocalQueryRunner
         this.costCalculator = new CostCalculatorUsingExchanges(taskCountEstimator);
         this.estimatedExchangesCostCalculator = new CostCalculatorWithEstimatedExchanges(costCalculator, taskCountEstimator);
 
-        this.planFragmenter = new PlanFragmenter(metadata, functionManager, transactionManager, catalogManager, new QueryManagerConfig());
+        this.planFragmenter = new PlanFragmenter(metadata, functionManager, transactionManager, catalogManager, languageFunctionManager, new QueryManagerConfig());
 
         GlobalSystemConnector globalSystemConnector = new GlobalSystemConnector(ImmutableSet.of(
                 new NodeSystemTable(nodeManager),
@@ -485,10 +487,11 @@ public class LocalQueryRunner
                 new SessionPropertyDefaults(nodeInfo, accessControl),
                 typeRegistry,
                 blockEncodingManager,
-                handleResolver,
+                new HandleResolver(),
                 exchangeManagerRegistry);
 
         catalogManager.registerGlobalSystemConnector(globalSystemConnector);
+        languageFunctionManager.setPlannerContext(plannerContext);
 
         // rewrite session to use managed SessionPropertyMetadata
         this.defaultSession = new Session(
@@ -655,6 +658,12 @@ public class LocalQueryRunner
         return functionManager;
     }
 
+    @Override
+    public LanguageFunctionManager getLanguageFunctionManager()
+    {
+        return languageFunctionManager;
+    }
+
     public TypeOperators getTypeOperators()
     {
         return plannerContext.getTypeOperators();
@@ -745,19 +754,19 @@ public class LocalQueryRunner
 
     public void createCatalog(String catalogName, ConnectorFactory connectorFactory, Map<String, String> properties)
     {
-        catalogFactory.addConnectorFactory(connectorFactory, ignored -> connectorFactory.getClass().getClassLoader());
+        catalogFactory.addConnectorFactory(connectorFactory);
         catalogManager.createCatalog(catalogName, new ConnectorName(connectorFactory.getName()), properties, false);
     }
 
     public void registerCatalogFactory(ConnectorFactory connectorFactory)
     {
-        catalogFactory.addConnectorFactory(connectorFactory, ignored -> connectorFactory.getClass().getClassLoader());
+        catalogFactory.addConnectorFactory(connectorFactory);
     }
 
     @Override
     public void installPlugin(Plugin plugin)
     {
-        pluginManager.installPlugin(plugin, ignored -> plugin.getClass().getClassLoader());
+        pluginManager.installPlugin(plugin);
     }
 
     @Override
@@ -864,6 +873,7 @@ public class LocalQueryRunner
         lock.readLock().lock();
         try (Closer closer = Closer.create()) {
             accessControl.checkCanExecuteQuery(session.getIdentity());
+
             AtomicReference<MaterializedResult.Builder> builder = new AtomicReference<>();
             PageConsumerOutputFactory outputFactory = new PageConsumerOutputFactory(types -> {
                 builder.compareAndSet(null, MaterializedResult.resultBuilder(session, types));
@@ -950,6 +960,7 @@ public class LocalQueryRunner
 
     public SubPlan createSubPlans(Session session, Plan plan, boolean forceSingleNode)
     {
+        languageFunctionManager.tryRegisterQuery(session);
         return planFragmenter.createSubPlans(session, plan, forceSingleNode, NOOP);
     }
 
@@ -999,7 +1010,8 @@ public class LocalQueryRunner
                 typeOperators,
                 tableExecuteContextManager,
                 exchangeManagerRegistry,
-                nodeManager.getCurrentNode().getNodeVersion());
+                nodeManager.getCurrentNode().getNodeVersion(),
+                new CompilerConfig());
 
         // plan query
         LocalExecutionPlan localExecutionPlan = executionPlanner.plan(

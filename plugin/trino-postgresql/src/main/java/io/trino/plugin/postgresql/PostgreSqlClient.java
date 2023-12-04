@@ -75,6 +75,7 @@ import io.trino.plugin.postgresql.PostgreSqlConfig.ArrayMapping;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
+import io.trino.spi.block.MapBlock;
 import io.trino.spi.block.SqlMap;
 import io.trino.spi.connector.AggregateFunction;
 import io.trino.spi.connector.ColumnHandle;
@@ -130,6 +131,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -918,6 +920,12 @@ public class PostgreSqlClient
     }
 
     @Override
+    public OptionalInt getMaxColumnNameLength(ConnectorSession session)
+    {
+        return getMaxColumnNameLengthFromDatabaseMetaData(session);
+    }
+
+    @Override
     public TableStatistics getTableStatistics(ConnectorSession session, JdbcTableHandle handle)
     {
         if (!statisticsEnabled) {
@@ -1192,7 +1200,7 @@ public class PostgreSqlClient
 
     private static ObjectWriteFunction longTimestampWriteFunction()
     {
-        return ObjectWriteFunction.of(LongTimestamp.class, ((statement, index, timestamp) -> {
+        return ObjectWriteFunction.of(LongTimestamp.class, (statement, index, timestamp) -> {
             // PostgreSQL supports up to 6 digits of precision
             //noinspection ConstantConditions
             verify(POSTGRESQL_MAX_SUPPORTED_TIMESTAMP_PRECISION == 6);
@@ -1202,7 +1210,7 @@ public class PostgreSqlClient
                 epochMicros++;
             }
             shortTimestampWriteFunction(statement, index, epochMicros);
-        }));
+        });
     }
 
     @Override
@@ -1306,8 +1314,8 @@ public class PostgreSqlClient
                     varcharMapType.getValueType().writeSlice(valueBlockBuilder, utf8Slice(entry.getValue()));
                 }
             }
-            return varcharMapType.createBlockFromKeyValue(Optional.empty(), new int[] {0, map.size()}, keyBlockBuilder.build(), valueBlockBuilder.build())
-                    .getObject(0, SqlMap.class);
+            MapBlock mapBlock = varcharMapType.createBlockFromKeyValue(Optional.empty(), new int[]{0, map.size()}, keyBlockBuilder.build(), valueBlockBuilder.build());
+            return varcharMapType.getObject(mapBlock, 0);
         });
     }
 

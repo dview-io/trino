@@ -48,6 +48,7 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.security.AccessDeniedException;
+import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.statistics.TableStatisticsMetadata;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.Type;
@@ -261,7 +262,7 @@ public class LogicalPlanner
             planSanityChecker.validateIntermediatePlan(root, session, plannerContext, typeAnalyzer, symbolAllocator.getTypes(), warningCollector);
         }
 
-        TableStatsProvider tableStatsProvider = new CachingTableStatsProvider(metadata, session);
+        CachingTableStatsProvider tableStatsProvider = new CachingTableStatsProvider(metadata, session);
 
         if (stage.ordinal() >= OPTIMIZED.ordinal()) {
             try (var ignored = scopedSpan(plannerContext.getTracer(), "optimizer")) {
@@ -280,13 +281,22 @@ public class LogicalPlanner
 
         TypeProvider types = symbolAllocator.getTypes();
 
-        StatsAndCosts statsAndCosts = StatsAndCosts.empty();
+        TableStatsProvider collectTableStatsProvider;
         if (collectPlanStatistics) {
-            StatsProvider statsProvider = new CachingStatsProvider(statsCalculator, session, types, tableStatsProvider);
-            CostProvider costProvider = new CachingCostProvider(costCalculator, statsProvider, Optional.empty(), session, types);
-            try (var ignored = scopedSpan(plannerContext.getTracer(), "plan-stats")) {
-                statsAndCosts = StatsAndCosts.create(root, statsProvider, costProvider);
-            }
+            collectTableStatsProvider = tableStatsProvider;
+        }
+        else {
+            // If stats collection was not requested explicitly, then use statistics
+            // that were fetched and cached during planning.
+            Map<TableHandle, TableStatistics> cachedStatistics = tableStatsProvider.getCachedTableStatistics();
+            collectTableStatsProvider = handle -> cachedStatistics.getOrDefault(handle, TableStatistics.empty());
+        }
+
+        StatsAndCosts statsAndCosts;
+        StatsProvider statsProvider = new CachingStatsProvider(statsCalculator, session, types, collectTableStatsProvider);
+        CostProvider costProvider = new CachingCostProvider(costCalculator, statsProvider, Optional.empty(), session, types);
+        try (var ignored = scopedSpan(plannerContext.getTracer(), "plan-stats")) {
+            statsAndCosts = StatsAndCosts.create(root, statsProvider, costProvider);
         }
         return new Plan(root, types, statsAndCosts);
     }
@@ -493,7 +503,7 @@ public class LogicalPlanner
                 analysis,
                 plan.getRoot(),
                 visibleFields(plan),
-                new CreateReference(catalogName, tableMetadata, newTableLayout),
+                new CreateReference(catalogName, tableMetadata, newTableLayout, create.isReplace()),
                 columnNames,
                 newTableLayout,
                 statisticsMetadata);
@@ -909,7 +919,7 @@ public class LogicalPlanner
         return new RelationPlanner(analysis, symbolAllocator, idAllocator, buildLambdaDeclarationToSymbolMap(analysis, symbolAllocator), plannerContext, Optional.empty(), session, ImmutableMap.of());
     }
 
-    private static Map<NodeRef<LambdaArgumentDeclaration>, Symbol> buildLambdaDeclarationToSymbolMap(Analysis analysis, SymbolAllocator symbolAllocator)
+    public static Map<NodeRef<LambdaArgumentDeclaration>, Symbol> buildLambdaDeclarationToSymbolMap(Analysis analysis, SymbolAllocator symbolAllocator)
     {
         Map<Key, Symbol> allocations = new HashMap<>();
         Map<NodeRef<LambdaArgumentDeclaration>, Symbol> result = new LinkedHashMap<>();

@@ -33,6 +33,7 @@ import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.ColumnMetadata;
 import io.trino.spi.connector.ConnectorCapabilities;
 import io.trino.spi.connector.ConnectorTableMetadata;
+import io.trino.spi.connector.SaveMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.security.AccessDeniedException;
 import io.trino.spi.type.TimestampType;
@@ -81,6 +82,7 @@ import static io.trino.sql.planner.TestingPlannerContext.plannerContextBuilder;
 import static io.trino.sql.tree.LikeClause.PropertiesOption.INCLUDING;
 import static io.trino.sql.tree.SaveMode.FAIL;
 import static io.trino.sql.tree.SaveMode.IGNORE;
+import static io.trino.sql.tree.SaveMode.REPLACE;
 import static io.trino.testing.TestingAccessControlManager.TestingPrivilegeType.SELECT_COLUMN;
 import static io.trino.testing.TestingAccessControlManager.TestingPrivilegeType.SHOW_CREATE_TABLE;
 import static io.trino.testing.TestingAccessControlManager.privilege;
@@ -93,9 +95,6 @@ import static java.util.Locale.ENGLISH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_METHOD;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
 
 @TestInstance(PER_METHOD)
 public class TestCreateTableTask
@@ -174,7 +173,7 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, emptyList(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
     }
 
     @Test
@@ -191,7 +190,23 @@ public class TestCreateTableTask
                 .hasErrorCode(ALREADY_EXISTS)
                 .hasMessage("Table already exists");
 
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReplaceTable()
+    {
+        CreateTable statement = new CreateTable(QualifiedName.of("test_table"),
+                ImmutableList.of(new ColumnDefinition(QualifiedName.of("a"), toSqlType(BIGINT), true, emptyList(), Optional.empty())),
+                REPLACE,
+                ImmutableList.of(),
+                Optional.empty());
+
+        CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
+        getFutureValue(createTableTask.internalExecute(statement, testSession, emptyList(), output -> {}));
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
+        assertThat(metadata.getReceivedTableMetadata().get(0).getColumns())
+                .isEqualTo(ImmutableList.of(new ColumnMetadata("a", BIGINT)));
     }
 
     @Test
@@ -206,9 +221,9 @@ public class TestCreateTableTask
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         assertTrinoExceptionThrownBy(() -> getFutureValue(createTableTask.internalExecute(statement, testSession, emptyList(), output -> {})))
                 .hasErrorCode(INVALID_TABLE_PROPERTY)
-                .hasMessage("Catalog 'test-catalog' table property 'foo' does not exist");
+                .hasMessage("Catalog 'test_catalog' table property 'foo' does not exist");
 
-        assertEquals(metadata.getCreateTableCallCount(), 0);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(0);
     }
 
     @Test
@@ -223,21 +238,21 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, emptyList(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
         List<ColumnMetadata> columns = metadata.getReceivedTableMetadata().get(0).getColumns();
-        assertEquals(columns.size(), 3);
+        assertThat(columns.size()).isEqualTo(3);
 
-        assertEquals(columns.get(0).getName(), "a");
-        assertEquals(columns.get(0).getType().getDisplayName().toUpperCase(ENGLISH), "DATE");
-        assertTrue(columns.get(0).isNullable());
+        assertThat(columns.get(0).getName()).isEqualTo("a");
+        assertThat(columns.get(0).getType().getDisplayName().toUpperCase(ENGLISH)).isEqualTo("DATE");
+        assertThat(columns.get(0).isNullable()).isTrue();
 
-        assertEquals(columns.get(1).getName(), "b");
-        assertEquals(columns.get(1).getType().getDisplayName().toUpperCase(ENGLISH), "VARCHAR");
-        assertFalse(columns.get(1).isNullable());
+        assertThat(columns.get(1).getName()).isEqualTo("b");
+        assertThat(columns.get(1).getType().getDisplayName().toUpperCase(ENGLISH)).isEqualTo("VARCHAR");
+        assertThat(columns.get(1).isNullable()).isFalse();
 
-        assertEquals(columns.get(2).getName(), "c");
-        assertEquals(columns.get(2).getType().getDisplayName().toUpperCase(ENGLISH), "VARBINARY");
-        assertFalse(columns.get(2).isNullable());
+        assertThat(columns.get(2).getName()).isEqualTo("c");
+        assertThat(columns.get(2).getType().getDisplayName().toUpperCase(ENGLISH)).isEqualTo("VARBINARY");
+        assertThat(columns.get(2).isNullable()).isFalse();
     }
 
     @Test
@@ -258,7 +273,7 @@ public class TestCreateTableTask
         assertTrinoExceptionThrownBy(() ->
                 getFutureValue(createTableTask.internalExecute(statement, testSession, emptyList(), output -> {})))
                 .hasErrorCode(NOT_SUPPORTED)
-                .hasMessage("Catalog 'test-catalog' does not support non-null column for column name 'b'");
+                .hasMessage("Catalog 'test_catalog' does not support non-null column for column name 'b'");
     }
 
     @Test
@@ -268,7 +283,7 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, List.of(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
 
         assertThat(metadata.getReceivedTableMetadata().get(0).getColumns())
                 .isEqualTo(PARENT_TABLE.getColumns());
@@ -282,7 +297,7 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, List.of(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
 
         assertThat(metadata.getReceivedTableMetadata().get(0).getColumns())
                 .isEqualTo(PARENT_TABLE.getColumns());
@@ -297,7 +312,7 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, List.of(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
 
         assertThat(metadata.getReceivedTableMetadata().get(0).getColumns())
                 .isEqualTo(PARENT_TABLE.getColumns());
@@ -393,7 +408,7 @@ public class TestCreateTableTask
 
         CreateTableTask createTableTask = new CreateTableTask(plannerContext, new AllowAllAccessControl(), columnPropertyManager, tablePropertyManager);
         getFutureValue(createTableTask.internalExecute(statement, testSession, List.of(), output -> {}));
-        assertEquals(metadata.getCreateTableCallCount(), 1);
+        assertThat(metadata.getCreateTableCallCount()).isEqualTo(1);
 
         assertThat(metadata.getReceivedTableMetadata().get(0).getColumns())
                 .isEqualTo(ImmutableList.of(new ColumnMetadata("a", TIMESTAMP_MILLIS)));
@@ -422,10 +437,13 @@ public class TestCreateTableTask
         private Set<ConnectorCapabilities> connectorCapabilities = ImmutableSet.of();
 
         @Override
-        public void createTable(Session session, String catalogName, ConnectorTableMetadata tableMetadata, boolean ignoreExisting)
+        public void createTable(Session session, String catalogName, ConnectorTableMetadata tableMetadata, SaveMode saveMode)
         {
+            if (saveMode == SaveMode.REPLACE) {
+                tables.removeIf(table -> table.getTable().equals(tableMetadata.getTable()));
+            }
             tables.add(tableMetadata);
-            if (!ignoreExisting) {
+            if (saveMode == SaveMode.FAIL) {
                 throw new TrinoException(ALREADY_EXISTS, "Table already exists");
             }
         }

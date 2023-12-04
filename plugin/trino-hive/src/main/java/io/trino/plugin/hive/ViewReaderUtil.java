@@ -110,7 +110,7 @@ public final class ViewReaderUtil
                             format("%s is redirected to %s, but that relation cannot be found", schemaTableName, target)));
             List<Column> columns = tableSchema.getColumns().stream()
                     .filter(columnSchema -> !columnSchema.isHidden())
-                    .map(columnSchema -> new Column(columnSchema.getName(), toHiveType(columnSchema.getType()), Optional.empty() /* comment */))
+                    .map(columnSchema -> new Column(columnSchema.getName(), toHiveType(columnSchema.getType()), Optional.empty() /* comment */, Map.of()))
                     .collect(toImmutableList());
             Table table = Table.builder()
                     .setDatabaseName(schemaTableName.getSchemaName())
@@ -242,7 +242,7 @@ public final class ViewReaderUtil
             try {
                 HiveToRelConverter hiveToRelConverter = new HiveToRelConverter(metastoreClient);
                 RelNode rel = hiveToRelConverter.convertView(table.getDatabaseName(), table.getTableName());
-                RelToTrinoConverter relToTrino = new RelToTrinoConverter();
+                RelToTrinoConverter relToTrino = new RelToTrinoConverter(metastoreClient);
                 String trinoSql = relToTrino.convert(rel);
                 RelDataType rowType = rel.getRowType();
                 List<ViewColumn> columns = rowType.getFieldList().stream()

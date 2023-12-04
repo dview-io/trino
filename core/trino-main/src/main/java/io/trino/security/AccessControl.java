@@ -253,14 +253,6 @@ public interface AccessControl
     void checkCanShowColumns(SecurityContext context, CatalogSchemaTableName table);
 
     /**
-     * Filter the list of columns to those visible to the identity.
-     *
-     * @deprecated Use {@link #filterColumns(SecurityContext, String, Map)}
-     */
-    @Deprecated
-    Set<String> filterColumns(SecurityContext context, CatalogSchemaTableName tableName, Set<String> columns);
-
-    /**
      * Filter lists of columns of multiple tables to those visible to the identity.
      */
     Map<SchemaTableName, Set<String>> filterColumns(SecurityContext context, String catalogName, Map<SchemaTableName, Set<String>> tableColumns);
@@ -572,6 +564,20 @@ public interface AccessControl
      * Filter the list of functions to those visible to the identity.
      */
     Set<SchemaFunctionName> filterFunctions(SecurityContext context, String catalogName, Set<SchemaFunctionName> functionNames);
+
+    /**
+     * Check if identity is allowed to create the specified function.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    void checkCanCreateFunction(SecurityContext context, QualifiedObjectName functionName);
+
+    /**
+     * Check if identity is allowed to drop the specified function.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    void checkCanDropFunction(SecurityContext context, QualifiedObjectName functionName);
 
     default List<ViewExpression> getRowFilters(SecurityContext context, QualifiedObjectName tableName)
     {

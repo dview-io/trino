@@ -60,7 +60,7 @@ public class SqlMap
         this.hashTablesSupplier = new HashTableSupplier(createSingleTable(mapType, mode, keyBlock).get());
     }
 
-    public SqlMap(MapType mapType, Block rawKeyBlock, Block rawValueBlock, HashTableSupplier hashTablesSupplier, int offset, int size)
+    SqlMap(MapType mapType, Block rawKeyBlock, Block rawValueBlock, HashTableSupplier hashTablesSupplier, int offset, int size)
     {
         this.mapType = requireNonNull(mapType, "mapType is null");
         this.rawKeyBlock = requireNonNull(rawKeyBlock, "rawKeyBlock is null");
@@ -96,6 +96,26 @@ public class SqlMap
     public Block getRawValueBlock()
     {
         return rawValueBlock;
+    }
+
+    public int getUnderlyingKeyPosition(int position)
+    {
+        return rawKeyBlock.getUnderlyingValuePosition(offset + position);
+    }
+
+    public ValueBlock getUnderlyingKeyBlock()
+    {
+        return rawKeyBlock.getUnderlyingValueBlock();
+    }
+
+    public int getUnderlyingValuePosition(int position)
+    {
+        return rawValueBlock.getUnderlyingValuePosition(offset + position);
+    }
+
+    public ValueBlock getUnderlyingValueBlock()
+    {
+        return rawValueBlock.getUnderlyingValueBlock();
     }
 
     @Override

@@ -36,10 +36,12 @@ import io.trino.spi.type.Type;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.plugin.hive.metastore.Database.DEFAULT_DATABASE_NAME;
 import static io.trino.plugin.hive.metastore.HivePrivilegeInfo.HivePrivilege;
@@ -59,6 +61,7 @@ import static io.trino.spi.security.AccessDeniedException.denyAlterColumn;
 import static io.trino.spi.security.AccessDeniedException.denyCommentColumn;
 import static io.trino.spi.security.AccessDeniedException.denyCommentTable;
 import static io.trino.spi.security.AccessDeniedException.denyCommentView;
+import static io.trino.spi.security.AccessDeniedException.denyCreateFunction;
 import static io.trino.spi.security.AccessDeniedException.denyCreateMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyCreateRole;
 import static io.trino.spi.security.AccessDeniedException.denyCreateSchema;
@@ -67,6 +70,7 @@ import static io.trino.spi.security.AccessDeniedException.denyCreateView;
 import static io.trino.spi.security.AccessDeniedException.denyCreateViewWithSelect;
 import static io.trino.spi.security.AccessDeniedException.denyDeleteTable;
 import static io.trino.spi.security.AccessDeniedException.denyDropColumn;
+import static io.trino.spi.security.AccessDeniedException.denyDropFunction;
 import static io.trino.spi.security.AccessDeniedException.denyDropMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyDropRole;
 import static io.trino.spi.security.AccessDeniedException.denyDropSchema;
@@ -258,19 +262,20 @@ public class SqlStandardAccessControl
     }
 
     @Override
-    public Set<String> filterColumns(ConnectorSecurityContext context, SchemaTableName tableName, Set<String> columns)
+    public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
+    {
+        return tableColumns.entrySet().stream()
+                .collect(toImmutableMap(
+                        Entry::getKey,
+                        entry -> filterColumns(context, entry.getKey(), entry.getValue())));
+    }
+
+    private Set<String> filterColumns(ConnectorSecurityContext context, SchemaTableName tableName, Set<String> columns)
     {
         if (!hasAnyTablePermission(context, tableName)) {
             return ImmutableSet.of();
         }
         return columns;
-    }
-
-    @Override
-    public Map<SchemaTableName, Set<String>> filterColumns(ConnectorSecurityContext context, Map<SchemaTableName, Set<String>> tableColumns)
-    {
-        // Default implementation is good enough. Explicit implementation is expected by the test though.
-        return ConnectorAccessControl.super.filterColumns(context, tableColumns);
     }
 
     @Override
@@ -605,6 +610,22 @@ public class SqlStandardAccessControl
     public Set<SchemaFunctionName> filterFunctions(ConnectorSecurityContext context, Set<SchemaFunctionName> functionNames)
     {
         return functionNames;
+    }
+
+    @Override
+    public void checkCanCreateFunction(ConnectorSecurityContext context, SchemaRoutineName function)
+    {
+        if (!isDatabaseOwner(context, function.getSchemaName())) {
+            denyCreateFunction(function.toString());
+        }
+    }
+
+    @Override
+    public void checkCanDropFunction(ConnectorSecurityContext context, SchemaRoutineName function)
+    {
+        if (!isDatabaseOwner(context, function.getSchemaName())) {
+            denyDropFunction(function.toString());
+        }
     }
 
     @Override

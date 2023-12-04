@@ -53,6 +53,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.parallel.Execution;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -78,11 +79,13 @@ import static io.trino.testing.TestingSession.testSessionBuilder;
 import static io.trino.transaction.TransactionBuilder.transaction;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.offset;
 import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.parallel.ExecutionMode.CONCURRENT;
 
 @TestInstance(PER_CLASS)
+@Execution(CONCURRENT)
 public class TestCostCalculator
 {
     private static final int NUMBER_OF_NODES = 10;
@@ -105,6 +108,7 @@ public class TestCostCalculator
         session = testSessionBuilder().setCatalog(TEST_CATALOG_NAME).build();
 
         localQueryRunner = LocalQueryRunner.create(session);
+        localQueryRunner.getLanguageFunctionManager().registerQuery(session);
         localQueryRunner.createCatalog(TEST_CATALOG_NAME, new TpchConnectorFactory(), ImmutableMap.of());
 
         planFragmenter = new PlanFragmenter(
@@ -112,6 +116,7 @@ public class TestCostCalculator
                 localQueryRunner.getFunctionManager(),
                 localQueryRunner.getTransactionManager(),
                 localQueryRunner.getCatalogManager(),
+                localQueryRunner.getLanguageFunctionManager(),
                 new QueryManagerConfig());
     }
 
@@ -677,7 +682,7 @@ public class TestCostCalculator
         StatsCalculator statsCalculator = statsCalculator(stats);
         PlanCostEstimate costWithExchanges = calculateCost(node, costCalculatorUsingExchanges, statsCalculator, types);
         PlanCostEstimate costWithFragments = calculateCostFragmentedPlan(node, statsCalculator, types);
-        assertEquals(costWithExchanges, costWithFragments);
+        assertThat(costWithExchanges).isEqualTo(costWithFragments);
     }
 
     private StatsCalculator statsCalculator(Map<String, PlanNodeStatsEstimate> stats)
@@ -732,31 +737,31 @@ public class TestCostCalculator
 
         CostAssertionBuilder cpu(double value)
         {
-            assertEquals(actual.getCpuCost(), value, 0.000001);
+            assertThat(actual.getCpuCost()).isCloseTo(value, offset(0.000001));
             return this;
         }
 
         CostAssertionBuilder memory(double value)
         {
-            assertEquals(actual.getMaxMemory(), value, 0.000001);
+            assertThat(actual.getMaxMemory()).isCloseTo(value, offset(0.000001));
             return this;
         }
 
         CostAssertionBuilder memoryWhenOutputting(double value)
         {
-            assertEquals(actual.getMaxMemoryWhenOutputting(), value, 0.000001);
+            assertThat(actual.getMaxMemoryWhenOutputting()).isCloseTo(value, offset(0.000001));
             return this;
         }
 
         CostAssertionBuilder network(double value)
         {
-            assertEquals(actual.getNetworkCost(), value, 0.000001);
+            assertThat(actual.getNetworkCost()).isCloseTo(value, offset(0.000001));
             return this;
         }
 
         CostAssertionBuilder hasUnknownComponents()
         {
-            assertTrue(actual.hasUnknownComponents());
+            assertThat(actual.hasUnknownComponents()).isTrue();
             return this;
         }
     }

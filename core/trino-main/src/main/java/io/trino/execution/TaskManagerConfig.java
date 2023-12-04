@@ -56,7 +56,7 @@ public class TaskManagerConfig
     private boolean shareIndexLoading;
     private int maxWorkerThreads = Runtime.getRuntime().availableProcessors() * 2;
     private Integer minDrivers;
-    private Integer initialSplitsPerNode;
+    private int initialSplitsPerNode = maxWorkerThreads;
     private int minDriversPerTask = 3;
     private int maxDriversPerTask = Integer.MAX_VALUE;
     private Duration splitConcurrencyAdjustmentInterval = new Duration(100, TimeUnit.MILLISECONDS);
@@ -294,9 +294,6 @@ public class TaskManagerConfig
     @Min(1)
     public int getInitialSplitsPerNode()
     {
-        if (initialSplitsPerNode == null) {
-            return maxWorkerThreads;
-        }
         return initialSplitsPerNode;
     }
 

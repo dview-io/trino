@@ -511,8 +511,8 @@ public class PredicatePushDown
                     ComparisonExpression equality = (ComparisonExpression) conjunct;
 
                     boolean alignedComparison = node.getLeft().getOutputSymbols().containsAll(extractUnique(equality.getLeft()));
-                    Expression leftExpression = (alignedComparison) ? equality.getLeft() : equality.getRight();
-                    Expression rightExpression = (alignedComparison) ? equality.getRight() : equality.getLeft();
+                    Expression leftExpression = alignedComparison ? equality.getLeft() : equality.getRight();
+                    Expression rightExpression = alignedComparison ? equality.getRight() : equality.getLeft();
 
                     Symbol leftSymbol = symbolForExpression(leftExpression);
                     if (!node.getLeft().getOutputSymbols().contains(leftSymbol)) {
@@ -610,7 +610,8 @@ public class PredicatePushDown
                 JoinNode node,
                 List<JoinNode.EquiJoinClause> equiJoinClauses,
                 List<Expression> joinFilterClauses,
-                Session session, PlanNodeIdAllocator idAllocator)
+                Session session,
+                PlanNodeIdAllocator idAllocator)
         {
             if ((node.getType() != INNER && node.getType() != RIGHT) || !isEnableDynamicFiltering(session) || !dynamicFiltering) {
                 return new DynamicFiltersResult(ImmutableMap.of(), ImmutableList.of());
