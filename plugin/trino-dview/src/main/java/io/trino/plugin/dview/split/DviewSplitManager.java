@@ -61,19 +61,6 @@ public class DviewSplitManager
                         new DviewSplit(addresses, document.getPath(), segment.getDateValue().toString(), segment.getTimeValue() != null ? segment.getTimeValue().toString() : null)
                 ).toList().stream()))
                 .collect(Collectors.toList());
-//        DviewColumnHandle dataVersionColumn = new DviewColumnHandle("dpt_data_version", IntegerType.INTEGER, 0, false, 1);
-//        if (constraint.getPredicateColumns().isEmpty()) {
-//            Set<ColumnHandle> predicateColumns  = new HashSet<>();
-//            predicateColumns.add(new DviewColumnHandle("dpt_data_version", IntegerType.INTEGER, 0, false,1));
-//        }
-//        else {
-//            constraint.getPredicateColumns().get().add();
-//        }
-        System.out.println("splits: " + splits);
-
-//        List<DviewSplit> testSplits = segments.stream()
-//                .map(segment -> new DviewSplit(addresses, dviewTableHandle.getEntity().getId(), dviewTableHandle.getEntity().getName()))
-//                .collect(Collectors.toList());
         return new FixedSplitSource(splits);
     }
 }
