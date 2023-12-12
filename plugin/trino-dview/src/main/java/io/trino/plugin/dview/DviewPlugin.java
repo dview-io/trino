@@ -14,8 +14,12 @@
 package io.trino.plugin.dview;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import io.trino.plugin.dview.udfs.EncryptDecrypt;
 import io.trino.spi.Plugin;
 import io.trino.spi.connector.ConnectorFactory;
+
+import java.util.Set;
 
 public class DviewPlugin
         implements Plugin
@@ -24,5 +28,13 @@ public class DviewPlugin
     public Iterable<ConnectorFactory> getConnectorFactories()
     {
         return ImmutableList.of(new DviewConnectionFactory());
+    }
+
+    @Override
+    public Set<Class<?>> getFunctions()
+    {
+        return ImmutableSet.<Class<?>>builder()
+                .add(EncryptDecrypt.class)
+                .build();
     }
 }

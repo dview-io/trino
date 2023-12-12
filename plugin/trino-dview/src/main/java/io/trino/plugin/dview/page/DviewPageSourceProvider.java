@@ -33,6 +33,7 @@ import io.trino.hdfs.TrinoHdfsFileSystemStats;
 import io.trino.hdfs.authentication.NoHdfsAuthentication;
 import io.trino.orc.OrcReaderOptions;
 import io.trino.parquet.BloomFilterStore;
+import io.trino.parquet.Column;
 import io.trino.parquet.Field;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSource;
@@ -270,7 +271,7 @@ public class DviewPageSourceProvider
                         .orElse(columnHandles);
                 ParquetDataSourceId dataSourceId = dataSource.getId();
                 ParquetPageSource.Builder pageSourceBuilder = ParquetPageSource.builder();
-                ImmutableList.Builder<Field> parquetColumnFieldsBuilder = ImmutableList.builder();
+                ImmutableList.Builder<Column> parquetColumnFieldsBuilder = ImmutableList.builder();
                 int sourceChannel = 0;
                 for (DviewColumnHandle column : baseColumns) {
                     if (Objects.equals(column.getColumnName(),
@@ -303,7 +304,7 @@ public class DviewPageSourceProvider
                             pageSourceBuilder.addNullColumn(column.getColumnType());
                             continue;
                         }
-                        parquetColumnFieldsBuilder.add(field.get());
+                        parquetColumnFieldsBuilder.add(new Column(columnName, field.get()));
                         pageSourceBuilder.addSourceColumn(sourceChannel);
                         sourceChannel++;
                     }
