@@ -5,7 +5,7 @@ additionalCatalogs:
         connector.name= dview
         mysql.url=jdbc:mysql://dview-integ-test.cjab8ksmggyx.ap-south-1.rds.amazonaws.com:3306/fortress?useSSL=false
         mysql.username=data
-        mysql.password=Dview123
+        mysql.password=
         client.type=EMBEDDED
         connection.timeout= 3600
         dview.org=io.dview
