@@ -52,7 +52,7 @@ import static com.google.common.collect.ImmutableListMultimap.toImmutableListMul
 import static io.trino.metadata.GlobalFunctionCatalog.builtinFunctionName;
 import static io.trino.spi.type.StandardTypes.BOOLEAN;
 import static io.trino.spi.type.StandardTypes.VARCHAR;
-import static io.trino.sql.ExpressionUtils.extractConjuncts;
+import static io.trino.sql.ir.IrUtils.extractConjuncts;
 import static io.trino.sql.tree.BooleanLiteral.FALSE_LITERAL;
 import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static io.trino.sql.tree.ComparisonExpression.Operator.EQUAL;
@@ -193,7 +193,11 @@ public final class DynamicFilters
 
     private static boolean isDynamicFilterFunction(FunctionCall functionCall)
     {
-        CatalogSchemaFunctionName functionName = ResolvedFunction.extractFunctionName(functionCall.getName());
+        return isDynamicFilterFunction(ResolvedFunction.extractFunctionName(functionCall.getName()));
+    }
+
+    public static boolean isDynamicFilterFunction(CatalogSchemaFunctionName functionName)
+    {
         return functionName.equals(builtinFunctionName(Function.NAME)) || functionName.equals(builtinFunctionName(NullableFunction.NAME));
     }
 

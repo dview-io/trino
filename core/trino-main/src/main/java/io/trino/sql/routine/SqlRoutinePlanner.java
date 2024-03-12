@@ -16,13 +16,13 @@ package io.trino.sql.routine;
 import com.google.common.base.VerifyException;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
 import io.trino.Session;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.ResolvedFunction;
 import io.trino.security.AllowAllAccessControl;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.TypeManager;
 import io.trino.sql.PlannerContext;
 import io.trino.sql.analyzer.Analysis;
 import io.trino.sql.analyzer.ExpressionAnalyzer;
@@ -30,7 +30,7 @@ import io.trino.sql.analyzer.Field;
 import io.trino.sql.analyzer.RelationId;
 import io.trino.sql.analyzer.RelationType;
 import io.trino.sql.analyzer.Scope;
-import io.trino.sql.planner.ExpressionInterpreter;
+import io.trino.sql.planner.IrExpressionInterpreter;
 import io.trino.sql.planner.LiteralEncoder;
 import io.trino.sql.planner.NoOpSymbolResolver;
 import io.trino.sql.planner.Symbol;
@@ -184,30 +184,19 @@ public final class SqlRoutinePlanner
         @Override
         protected IrStatement visitIfStatement(IfStatement node, Context context)
         {
-            IrStatement statement = null;
+            Optional<IrStatement> ifFalse = node.getElseClause().map(clause -> block(statements(clause.getStatements(), context)));
 
-            List<ElseIfClause> elseIfList = Lists.reverse(node.getElseIfClauses());
-            for (int i = 0; i < elseIfList.size(); i++) {
-                ElseIfClause elseIf = elseIfList.get(i);
-                RowExpression condition = toRowExpression(context, elseIf.getExpression());
-                IrStatement ifTrue = block(statements(elseIf.getStatements(), context));
-
-                Optional<IrStatement> ifFalse = Optional.empty();
-                if ((i == 0) && node.getElseClause().isPresent()) {
-                    List<ControlStatement> elseList = node.getElseClause().get().getStatements();
-                    ifFalse = Optional.of(block(statements(elseList, context)));
-                }
-                else if (statement != null) {
-                    ifFalse = Optional.of(statement);
-                }
-
-                statement = new IrIf(condition, ifTrue, ifFalse);
+            for (ElseIfClause elseIf : node.getElseIfClauses().reversed()) {
+                ifFalse = Optional.of(new IrIf(
+                        toRowExpression(context, elseIf.getExpression()),
+                        block(statements(elseIf.getStatements(), context)),
+                        ifFalse));
             }
 
             return new IrIf(
                     toRowExpression(context, node.getExpression()),
                     block(statements(node.getStatements(), context)),
-                    Optional.ofNullable(statement));
+                    ifFalse);
         }
 
         @Override
@@ -221,7 +210,7 @@ public final class SqlRoutinePlanner
                         .map(elseClause -> block(statements(elseClause.getStatements(), context)))
                         .orElseGet(() -> new IrBlock(ImmutableList.of(), ImmutableList.of()));
 
-                for (CaseStatementWhenClause whenClause : Lists.reverse(node.getWhenClauses())) {
+                for (CaseStatementWhenClause whenClause : node.getWhenClauses().reversed()) {
                     RowExpression conditionValue = toRowExpression(context, whenClause.getExpression());
 
                     RowExpression testValue = field(valueVariable.field(), valueVariable.type());
@@ -243,7 +232,7 @@ public final class SqlRoutinePlanner
                     .map(elseClause -> block(statements(elseClause.getStatements(), context)))
                     .orElseGet(() -> new IrBlock(ImmutableList.of(), ImmutableList.of()));
 
-            for (CaseStatementWhenClause whenClause : Lists.reverse(node.getWhenClauses())) {
+            for (CaseStatementWhenClause whenClause : node.getWhenClauses().reversed()) {
                 RowExpression condition = toRowExpression(context, whenClause.getExpression());
                 IrStatement ifTrue = block(statements(whenClause.getStatements(), context));
                 statement = new IrIf(condition, ifTrue, Optional.of(statement));
@@ -360,7 +349,7 @@ public final class SqlRoutinePlanner
             analyzer.analyze(lambdaCaptureDesugared, scope);
 
             // optimize the expression
-            ExpressionInterpreter interpreter = new ExpressionInterpreter(lambdaCaptureDesugared, plannerContext, session, analyzer.getExpressionTypes());
+            IrExpressionInterpreter interpreter = new IrExpressionInterpreter(lambdaCaptureDesugared, plannerContext, session, analyzer.getExpressionTypes());
             Expression optimized = new LiteralEncoder(plannerContext)
                     .toExpression(interpreter.optimize(NoOpSymbolResolver.INSTANCE), analyzer.getExpressionTypes().get(NodeRef.of(lambdaCaptureDesugared)));
 
@@ -372,7 +361,7 @@ public final class SqlRoutinePlanner
             analyzer.analyze(optimized, scope);
 
             // translate to RowExpression
-            TranslationVisitor translator = new TranslationVisitor(plannerContext.getMetadata(), analyzer.getExpressionTypes(), ImmutableMap.of(), context.variables());
+            TranslationVisitor translator = new TranslationVisitor(plannerContext.getMetadata(), plannerContext.getTypeManager(), analyzer.getExpressionTypes(), ImmutableMap.of(), context.variables());
             RowExpression rowExpression = translator.process(optimized, null);
 
             // optimize RowExpression
@@ -388,7 +377,7 @@ public final class SqlRoutinePlanner
             if (coercion == null) {
                 return rewritten;
             }
-            return new Cast(rewritten, toSqlType(coercion), false, analysis.isTypeOnlyCoercion(original));
+            return new Cast(rewritten, toSqlType(coercion), false);
         }
 
         private ExpressionAnalyzer createExpressionAnalyzer(Session session, TypeProvider typeProvider)
@@ -444,11 +433,12 @@ public final class SqlRoutinePlanner
 
         public TranslationVisitor(
                 Metadata metadata,
+                TypeManager typeManager,
                 Map<NodeRef<Expression>, Type> types,
                 Map<Symbol, Integer> layout,
                 Map<String, IrVariable> variables)
         {
-            super(metadata, types, layout);
+            super(metadata, typeManager, types, layout);
             this.variables = requireNonNull(variables, "variables is null");
         }
 

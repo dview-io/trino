@@ -24,14 +24,13 @@ import io.trino.spi.connector.SortOrder;
 import io.trino.sql.planner.OrderingScheme;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.assertions.ExpectedValueProvider;
-import io.trino.sql.planner.assertions.PlanMatchPattern;
 import io.trino.sql.planner.iterative.rule.test.BaseRuleTest;
 import io.trino.sql.planner.iterative.rule.test.PlanBuilder;
 import io.trino.sql.planner.plan.Assignments;
 import io.trino.sql.planner.plan.DataOrganizationSpecification;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.WindowNode;
-import io.trino.sql.tree.WindowFrame;
+import io.trino.sql.tree.SymbolReference;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -49,8 +48,9 @@ import static io.trino.sql.planner.assertions.PlanMatchPattern.strictProject;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.values;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.window;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.windowFrame;
-import static io.trino.sql.tree.FrameBound.Type.CURRENT_ROW;
-import static io.trino.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static io.trino.sql.planner.plan.FrameBoundType.CURRENT_ROW;
+import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_PRECEDING;
+import static io.trino.sql.planner.plan.WindowFrameType.RANGE;
 
 public class TestPruneWindowColumns
         extends BaseRuleTest
@@ -62,7 +62,7 @@ public class TestPruneWindowColumns
     private static final Set<String> inputSymbolNameSet = ImmutableSet.copyOf(inputSymbolNameList);
 
     private static final ExpectedValueProvider<WindowNode.Frame> frameProvider1 = windowFrame(
-            WindowFrame.Type.RANGE,
+            RANGE,
             UNBOUNDED_PRECEDING,
             Optional.of("startValue1"),
             CURRENT_ROW,
@@ -70,7 +70,7 @@ public class TestPruneWindowColumns
             Optional.of("orderKey"));
 
     private static final ExpectedValueProvider<WindowNode.Frame> frameProvider2 = windowFrame(
-            WindowFrame.Type.RANGE,
+            RANGE,
             UNBOUNDED_PRECEDING,
             Optional.of("startValue2"),
             CURRENT_ROW,
@@ -84,7 +84,7 @@ public class TestPruneWindowColumns
                 .on(p -> buildProjectedWindow(p, symbol -> inputSymbolNameSet.contains(symbol.getName()), alwaysTrue()))
                 .matches(
                         strictProject(
-                                Maps.asMap(inputSymbolNameSet, PlanMatchPattern::expression),
+                                Maps.asMap(inputSymbolNameSet, symbol -> expression(new SymbolReference(symbol))),
                                 values(inputSymbolNameList)));
     }
 
@@ -98,8 +98,8 @@ public class TestPruneWindowColumns
                 .matches(
                         strictProject(
                                 ImmutableMap.of(
-                                        "output2", expression("output2"),
-                                        "unused", expression("unused")),
+                                        "output2", expression(new SymbolReference("output2")),
+                                        "unused", expression(new SymbolReference("unused"))),
                                 window(windowBuilder -> windowBuilder
                                                 .prePartitionedInputs(ImmutableSet.of())
                                                 .specification(
@@ -116,7 +116,7 @@ public class TestPruneWindowColumns
                                         strictProject(
                                                 Maps.asMap(
                                                         Sets.difference(inputSymbolNameSet, ImmutableSet.of("input1", "startValue1", "endValue1")),
-                                                        PlanMatchPattern::expression),
+                                                        symbol -> expression(new SymbolReference(symbol))),
                                                 values(inputSymbolNameList)))));
     }
 
@@ -154,8 +154,8 @@ public class TestPruneWindowColumns
                 .matches(
                         strictProject(
                                 ImmutableMap.of(
-                                        "output1", expression("output1"),
-                                        "output2", expression("output2")),
+                                        "output1", expression(new SymbolReference("output1")),
+                                        "output2", expression(new SymbolReference("output2"))),
                                 window(windowBuilder -> windowBuilder
                                                 .prePartitionedInputs(ImmutableSet.of())
                                                 .specification(
@@ -177,7 +177,7 @@ public class TestPruneWindowColumns
                                         strictProject(
                                                 Maps.asMap(
                                                         Sets.filter(inputSymbolNameSet, symbolName -> !symbolName.equals("unused")),
-                                                        PlanMatchPattern::expression),
+                                                        symbol -> expression(new SymbolReference(symbol))),
                                                 values(inputSymbolNameList)))));
     }
 
@@ -218,7 +218,7 @@ public class TestPruneWindowColumns
                                         MIN_FUNCTION,
                                         ImmutableList.of(input1.toSymbolReference()),
                                         new WindowNode.Frame(
-                                                WindowFrame.Type.RANGE,
+                                                RANGE,
                                                 UNBOUNDED_PRECEDING,
                                                 Optional.of(startValue1),
                                                 Optional.of(orderKey),
@@ -233,7 +233,7 @@ public class TestPruneWindowColumns
                                         MIN_FUNCTION,
                                         ImmutableList.of(input2.toSymbolReference()),
                                         new WindowNode.Frame(
-                                                WindowFrame.Type.RANGE,
+                                                RANGE,
                                                 UNBOUNDED_PRECEDING,
                                                 Optional.of(startValue2),
                                                 Optional.of(orderKey),

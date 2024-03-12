@@ -49,8 +49,8 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.planner.TestingPlannerContext.plannerContextBuilder;
 import static io.trino.testing.TestingSession.testSessionBuilder;
+import static io.trino.testing.TransactionBuilder.transaction;
 import static io.trino.transaction.InMemoryTransactionManager.createTestTransactionManager;
-import static io.trino.transaction.TransactionBuilder.transaction;
 import static io.trino.type.UnknownType.UNKNOWN;
 import static java.lang.Math.floor;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -133,6 +133,75 @@ class TestSqlFunctions
             assertThat(handle.invoke(10L)).isEqualTo(utf8Slice("ten"));
             assertThat(handle.invoke(20L)).isEqualTo(utf8Slice("twenty"));
             assertThat(handle.invoke(42L)).isEqualTo(utf8Slice("other"));
+        });
+    }
+
+    @Test
+    void testSingleIf()
+    {
+        @Language("SQL") String sql = """
+                FUNCTION test_if(a bigint)
+                  RETURNS varchar
+                  BEGIN
+                    IF a = 0 THEN
+                      RETURN 'zero';
+                    END IF;
+                    RETURN 'other';
+                  END
+                  """;
+        assertFunction(sql, handle -> {
+            assertThat(handle.invoke(0L)).isEqualTo(utf8Slice("zero"));
+            assertThat(handle.invoke(1L)).isEqualTo(utf8Slice("other"));
+            assertThat(handle.invoke(10L)).isEqualTo(utf8Slice("other"));
+        });
+    }
+
+    @Test
+    void testSingleBranchIfElse()
+    {
+        @Language("SQL") String sql = """
+                FUNCTION if_else(a bigint)
+                  RETURNS varchar
+                  BEGIN
+                    IF a = 0 THEN
+                      RETURN 'zero';
+                    ELSE
+                      RETURN 'other';
+                    END IF;
+                    RETURN NULL;
+                  END
+                  """;
+        assertFunction(sql, handle -> {
+            assertThat(handle.invoke(0L)).isEqualTo(utf8Slice("zero"));
+            assertThat(handle.invoke(1L)).isEqualTo(utf8Slice("other"));
+            assertThat(handle.invoke(10L)).isEqualTo(utf8Slice("other"));
+        });
+    }
+
+    @Test
+    void testMultiBranchIfElse()
+    {
+        @Language("SQL") String sql = """
+                FUNCTION multi_if_else(a bigint)
+                  RETURNS varchar
+                  BEGIN
+                    IF a = 0 THEN
+                      RETURN 'zero';
+                    ELSEIF a = 1 THEN
+                      RETURN 'one';
+                    ELSEIF a = 2 THEN
+                      RETURN 'two';
+                    ELSE
+                      RETURN 'other';
+                    END IF;
+                    RETURN NULL;
+                  END
+                  """;
+        assertFunction(sql, handle -> {
+            assertThat(handle.invoke(0L)).isEqualTo(utf8Slice("zero"));
+            assertThat(handle.invoke(1L)).isEqualTo(utf8Slice("one"));
+            assertThat(handle.invoke(2L)).isEqualTo(utf8Slice("two"));
+            assertThat(handle.invoke(10L)).isEqualTo(utf8Slice("other"));
         });
     }
 

@@ -22,9 +22,9 @@ import io.trino.sql.tree.ArithmeticBinaryExpression;
 import io.trino.sql.tree.ArithmeticUnaryExpression;
 import io.trino.sql.tree.BooleanLiteral;
 import io.trino.sql.tree.Cast;
-import io.trino.sql.tree.CharLiteral;
 import io.trino.sql.tree.DoubleLiteral;
 import io.trino.sql.tree.FunctionCall;
+import io.trino.sql.tree.GenericLiteral;
 import io.trino.sql.tree.IsNullPredicate;
 import io.trino.sql.tree.LongLiteral;
 import io.trino.sql.tree.NullLiteral;
@@ -37,7 +37,6 @@ import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.trino.sql.planner.LogicalPlanner.failFunction;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.values;
-import static io.trino.sql.planner.iterative.rule.test.PlanBuilder.expression;
 import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.ADD;
 import static io.trino.sql.tree.ArithmeticUnaryExpression.Sign.MINUS;
 
@@ -70,8 +69,8 @@ public class TestMergeProjectWithValues
                                 p.valuesOfExpressions(
                                         ImmutableList.of(p.symbol("a"), p.symbol("b")),
                                         ImmutableList.of(
-                                                new Row(ImmutableList.of(new CharLiteral("x"), new BooleanLiteral("true"))),
-                                                new Row(ImmutableList.of(new CharLiteral("y"), new BooleanLiteral("false")))))))
+                                                new Row(ImmutableList.of(new GenericLiteral("CHAR", "x"), new BooleanLiteral("true"))),
+                                                new Row(ImmutableList.of(new GenericLiteral("CHAR", "y"), new BooleanLiteral("false")))))))
                 .matches(values(2));
 
         // ValuesNode has no output symbols and two rows
@@ -112,21 +111,21 @@ public class TestMergeProjectWithValues
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p ->
                         p.project(
-                                Assignments.of(p.symbol("a"), new CharLiteral("x"), p.symbol("b"), new BooleanLiteral("true")),
+                                Assignments.of(p.symbol("a"), new GenericLiteral("CHAR", "x"), p.symbol("b"), new BooleanLiteral("true")),
                                 p.values(
                                         ImmutableList.of(),
                                         ImmutableList.of(ImmutableList.of(), ImmutableList.of()))))
                 .matches(values(
                         ImmutableList.of("a", "b"),
                         ImmutableList.of(
-                                ImmutableList.of(new CharLiteral("x"), new BooleanLiteral("true")),
-                                ImmutableList.of(new CharLiteral("x"), new BooleanLiteral("true")))));
+                                ImmutableList.of(new GenericLiteral("CHAR", "x"), new BooleanLiteral("true")),
+                                ImmutableList.of(new GenericLiteral("CHAR", "x"), new BooleanLiteral("true")))));
 
         // ValuesNode has no rows
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p ->
                         p.project(
-                                Assignments.of(p.symbol("a"), new CharLiteral("x"), p.symbol("b"), new BooleanLiteral("true")),
+                                Assignments.of(p.symbol("a"), new GenericLiteral("CHAR", "x"), p.symbol("b"), new BooleanLiteral("true")),
                                 p.values(
                                         ImmutableList.of(),
                                         ImmutableList.of())))
@@ -142,7 +141,7 @@ public class TestMergeProjectWithValues
 
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("rand"), expression("rand")),
+                        Assignments.of(p.symbol("rand"), new SymbolReference("rand")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("rand")),
                                 ImmutableList.of(new Row(ImmutableList.of(randomFunction))))))
@@ -154,7 +153,7 @@ public class TestMergeProjectWithValues
         // ValuesNode has multiple rows
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("output"), expression("value")),
+                        Assignments.of(p.symbol("output"), new SymbolReference("value")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("value")),
                                 ImmutableList.of(
@@ -173,8 +172,8 @@ public class TestMergeProjectWithValues
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
                         Assignments.of(
-                                p.symbol("x"), expression("-a"),
-                                p.symbol("y"), expression("b")),
+                                p.symbol("x"), new ArithmeticUnaryExpression(MINUS, new SymbolReference("a")),
+                                p.symbol("y"), new SymbolReference("b")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("a"), p.symbol("b")),
                                 ImmutableList.of(
@@ -200,8 +199,8 @@ public class TestMergeProjectWithValues
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
                         Assignments.of(
-                                p.symbol("x"), expression("rand"),
-                                p.symbol("y"), expression("rand")),
+                                p.symbol("x"), new SymbolReference("rand"),
+                                p.symbol("y"), new SymbolReference("rand")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("rand")),
                                 ImmutableList.of(new Row(ImmutableList.of(randomFunction))))))
@@ -209,7 +208,7 @@ public class TestMergeProjectWithValues
 
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("x"), expression("rand + rand")),
+                        Assignments.of(p.symbol("x"), new ArithmeticBinaryExpression(ADD, new SymbolReference("rand"), new SymbolReference("rand"))),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("rand")),
                                 ImmutableList.of(new Row(ImmutableList.of(randomFunction))))))
@@ -222,7 +221,7 @@ public class TestMergeProjectWithValues
         // correlation symbol in projection (note: the resulting plan is not yet supported in execution)
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("x"), expression("a + corr")),
+                        Assignments.of(p.symbol("x"), new ArithmeticBinaryExpression(ADD, new SymbolReference("a"), new SymbolReference("corr"))),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("a")),
                                 ImmutableList.of(new Row(ImmutableList.of(new LongLiteral("1")))))))
@@ -231,7 +230,7 @@ public class TestMergeProjectWithValues
         // correlation symbol in values (note: the resulting plan is not yet supported in execution)
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("x"), expression("a")),
+                        Assignments.of(p.symbol("x"), new SymbolReference("a")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("a")),
                                 ImmutableList.of(new Row(ImmutableList.of(new SymbolReference("corr")))))))
@@ -240,7 +239,7 @@ public class TestMergeProjectWithValues
         // correlation symbol is not present in the resulting expression
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))
                 .on(p -> p.project(
-                        Assignments.of(p.symbol("x"), expression("1")),
+                        Assignments.of(p.symbol("x"), new LongLiteral("1")),
                         p.valuesOfExpressions(
                                 ImmutableList.of(p.symbol("a")),
                                 ImmutableList.of(new Row(ImmutableList.of(new SymbolReference("corr")))))))
@@ -282,16 +281,16 @@ public class TestMergeProjectWithValues
                             p.valuesOfExpressions(
                                     ImmutableList.of(a, b, c),
                                     ImmutableList.of(
-                                            new Row(ImmutableList.of(new CharLiteral("x"), new BooleanLiteral("true"), new LongLiteral("1"))),
-                                            new Row(ImmutableList.of(new CharLiteral("y"), new BooleanLiteral("false"), new LongLiteral("2"))),
-                                            new Row(ImmutableList.of(new CharLiteral("z"), new BooleanLiteral("true"), new LongLiteral("3"))))));
+                                            new Row(ImmutableList.of(new GenericLiteral("CHAR", "x"), new BooleanLiteral("true"), new LongLiteral("1"))),
+                                            new Row(ImmutableList.of(new GenericLiteral("CHAR", "y"), new BooleanLiteral("false"), new LongLiteral("2"))),
+                                            new Row(ImmutableList.of(new GenericLiteral("CHAR", "z"), new BooleanLiteral("true"), new LongLiteral("3"))))));
                 })
                 .matches(values(
                         ImmutableList.of("a", "d", "e", "f"),
                         ImmutableList.of(
-                                ImmutableList.of(new CharLiteral("x"), new BooleanLiteral("true"), new IsNullPredicate(new CharLiteral("x")), new LongLiteral("1")),
-                                ImmutableList.of(new CharLiteral("y"), new BooleanLiteral("false"), new IsNullPredicate(new CharLiteral("y")), new LongLiteral("1")),
-                                ImmutableList.of(new CharLiteral("z"), new BooleanLiteral("true"), new IsNullPredicate(new CharLiteral("z")), new LongLiteral("1")))));
+                                ImmutableList.of(new GenericLiteral("CHAR", "x"), new BooleanLiteral("true"), new IsNullPredicate(new GenericLiteral("CHAR", "x")), new LongLiteral("1")),
+                                ImmutableList.of(new GenericLiteral("CHAR", "y"), new BooleanLiteral("false"), new IsNullPredicate(new GenericLiteral("CHAR", "y")), new LongLiteral("1")),
+                                ImmutableList.of(new GenericLiteral("CHAR", "z"), new BooleanLiteral("true"), new IsNullPredicate(new GenericLiteral("CHAR", "z")), new LongLiteral("1")))));
 
         // ValuesNode has no rows
         tester().assertThat(new MergeProjectWithValues(tester().getMetadata()))

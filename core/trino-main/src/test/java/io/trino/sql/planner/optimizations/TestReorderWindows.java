@@ -17,6 +17,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.trino.spi.connector.SortOrder;
+import io.trino.sql.PlannerContext;
+import io.trino.sql.planner.IrTypeAnalyzer;
 import io.trino.sql.planner.RuleStatsRecorder;
 import io.trino.sql.planner.assertions.BasePlanTest;
 import io.trino.sql.planner.assertions.ExpectedValueProvider;
@@ -26,6 +28,13 @@ import io.trino.sql.planner.iterative.Rule;
 import io.trino.sql.planner.iterative.rule.GatherAndMergeWindows;
 import io.trino.sql.planner.iterative.rule.RemoveRedundantIdentityProjections;
 import io.trino.sql.planner.plan.DataOrganizationSpecification;
+import io.trino.sql.tree.Cast;
+import io.trino.sql.tree.ComparisonExpression;
+import io.trino.sql.tree.GenericLiteral;
+import io.trino.sql.tree.IsNullPredicate;
+import io.trino.sql.tree.LongLiteral;
+import io.trino.sql.tree.NotExpression;
+import io.trino.sql.tree.SymbolReference;
 import io.trino.sql.tree.WindowFrame;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.Test;
@@ -34,8 +43,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static io.trino.sql.planner.PlanOptimizers.columnPruningRules;
-import static io.trino.sql.planner.TypeAnalyzer.createTestingTypeAnalyzer;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
+import static io.trino.sql.planner.assertions.PlanMatchPattern.dataType;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.expression;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.filter;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.functionCall;
@@ -43,6 +52,7 @@ import static io.trino.sql.planner.assertions.PlanMatchPattern.project;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.specification;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.window;
+import static io.trino.sql.tree.ComparisonExpression.Operator.GREATER_THAN;
 
 public class TestReorderWindows
         extends BasePlanTest
@@ -231,8 +241,8 @@ public class TestReorderWindows
                                         window(windowMatcherBuilder -> windowMatcherBuilder
                                                         .specification(windowA)
                                                         .addFunction(functionCall("lag", commonFrame, ImmutableList.of(QUANTITY_ALIAS, "ONE"))),
-                                                project(ImmutableMap.of("ONE", expression("CAST(expr AS bigint)")),
-                                                        project(ImmutableMap.of("expr", expression("1")),
+                                                project(ImmutableMap.of("ONE", expression(new Cast(new SymbolReference("expr"), dataType("bigint")))),
+                                                        project(ImmutableMap.of("expr", expression(new LongLiteral("1"))),
                                                                 LINEITEM_TABLESCAN_DOQRST)))))));
     }
 
@@ -256,7 +266,8 @@ public class TestReorderWindows
                                         .specification(windowA)
                                         .addFunction(functionCall("avg", commonFrame, ImmutableList.of(QUANTITY_ALIAS))),
                                 project(
-                                        filter("NOT (" + RECEIPTDATE_ALIAS + " IS NULL)",
+                                        filter(
+                                                new NotExpression(new IsNullPredicate(new SymbolReference(RECEIPTDATE_ALIAS))),
                                                 project(
                                                         window(windowMatcherBuilder -> windowMatcherBuilder
                                                                         .specification(windowApp)
@@ -287,7 +298,8 @@ public class TestReorderWindows
                                         window(windowMatcherBuilder -> windowMatcherBuilder
                                                         .specification(windowA)
                                                         .addFunction(functionCall("avg", commonFrame, ImmutableList.of(QUANTITY_ALIAS))),
-                                                filter("SUPPKEY > BIGINT '0'",
+                                                filter(
+                                                        new ComparisonExpression(GREATER_THAN, new SymbolReference("SUPPKEY"), new GenericLiteral("BIGINT", "0")),
                                                         LINEITEM_TABLESCAN_DOQRST))))));
     }
 
@@ -332,24 +344,25 @@ public class TestReorderWindows
 
     private void assertUnitPlan(@Language("SQL") String sql, PlanMatchPattern pattern)
     {
+        PlannerContext plannerContext = getPlanTester().getPlannerContext();
         List<PlanOptimizer> optimizers = ImmutableList.of(
-                new UnaliasSymbolReferences(getQueryRunner().getMetadata()),
+                new UnaliasSymbolReferences(getPlanTester().getPlannerContext().getMetadata()),
                 new PredicatePushDown(
-                        getQueryRunner().getPlannerContext(),
-                        createTestingTypeAnalyzer(getQueryRunner().getPlannerContext()),
+                        getPlanTester().getPlannerContext(),
+                        new IrTypeAnalyzer(plannerContext),
                         false,
                         false),
                 new IterativeOptimizer(
-                        getQueryRunner().getPlannerContext(),
+                        getPlanTester().getPlannerContext(),
                         new RuleStatsRecorder(),
-                        getQueryRunner().getStatsCalculator(),
-                        getQueryRunner().getEstimatedExchangesCostCalculator(),
+                        getPlanTester().getStatsCalculator(),
+                        getPlanTester().getEstimatedExchangesCostCalculator(),
                         ImmutableSet.<Rule<?>>builder()
                                 .add(new RemoveRedundantIdentityProjections())
                                 .add(new GatherAndMergeWindows.SwapAdjacentWindowsBySpecifications(0))
                                 .add(new GatherAndMergeWindows.SwapAdjacentWindowsBySpecifications(1))
                                 .add(new GatherAndMergeWindows.SwapAdjacentWindowsBySpecifications(2))
-                                .addAll(columnPruningRules(getQueryRunner().getMetadata()))
+                                .addAll(columnPruningRules(getPlanTester().getPlannerContext().getMetadata()))
                                 .build()));
         assertPlan(sql, pattern, optimizers);
     }

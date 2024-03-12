@@ -20,10 +20,8 @@ import com.azure.core.util.TracingOptions;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobContainerClientBuilder;
-import com.azure.storage.blob.models.AccountKind;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.ListBlobsOptions;
-import com.azure.storage.blob.models.StorageAccountInfo;
 import com.azure.storage.common.Utility;
 import com.azure.storage.file.datalake.DataLakeDirectoryClient;
 import com.azure.storage.file.datalake.DataLakeFileClient;
@@ -53,6 +51,7 @@ import static com.azure.storage.common.implementation.Constants.HeaderConstants.
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.filesystem.azure.AzureUtils.handleAzureException;
+import static io.trino.filesystem.azure.AzureUtils.isFileNotFoundException;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 import static java.util.UUID.randomUUID;
@@ -123,6 +122,9 @@ public class AzureFileSystem
             client.delete();
         }
         catch (RuntimeException e) {
+            if (isFileNotFoundException(e)) {
+                return;
+            }
             throw handleAzureException(e, "deleting file", azureLocation);
         }
     }
@@ -452,16 +454,13 @@ public class AzureFileSystem
     private boolean isHierarchicalNamespaceEnabled(AzureLocation location)
             throws IOException
     {
-        StorageAccountInfo accountInfo = createBlobContainerClient(location).getServiceClient().getAccountInfo();
-
-        AccountKind accountKind = accountInfo.getAccountKind();
-        if (accountKind == AccountKind.BLOB_STORAGE) {
-            return false;
+        try {
+            DataLakeFileSystemClient fileSystemClient = createFileSystemClient(location);
+            return fileSystemClient.getDirectoryClient("/").exists();
         }
-        if (accountKind != AccountKind.STORAGE_V2) {
-            throw new IOException("Unsupported account kind '%s': %s".formatted(accountKind, location));
+        catch (RuntimeException e) {
+            throw new IOException("Checking whether hierarchical namespace is enabled for the location %s failed".formatted(location), e);
         }
-        return accountInfo.isHierarchicalNamespaceEnabled();
     }
 
     private BlobClient createBlobClient(AzureLocation location)

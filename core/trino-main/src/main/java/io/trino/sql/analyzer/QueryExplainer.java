@@ -22,13 +22,13 @@ import io.trino.execution.warnings.WarningCollector;
 import io.trino.spi.TrinoException;
 import io.trino.sql.PlannerContext;
 import io.trino.sql.SqlFormatter;
+import io.trino.sql.planner.IrTypeAnalyzer;
 import io.trino.sql.planner.LogicalPlanner;
 import io.trino.sql.planner.Plan;
 import io.trino.sql.planner.PlanFragmenter;
 import io.trino.sql.planner.PlanNodeIdAllocator;
 import io.trino.sql.planner.PlanOptimizersFactory;
 import io.trino.sql.planner.SubPlan;
-import io.trino.sql.planner.TypeAnalyzer;
 import io.trino.sql.planner.optimizations.PlanOptimizer;
 import io.trino.sql.planner.planprinter.PlanPrinter;
 import io.trino.sql.tree.CreateCatalog;
@@ -63,7 +63,6 @@ public class QueryExplainer
     private final PlanFragmenter planFragmenter;
     private final PlannerContext plannerContext;
     private final AnalyzerFactory analyzerFactory;
-    private final StatementAnalyzerFactory statementAnalyzerFactory;
     private final StatsCalculator statsCalculator;
     private final CostCalculator costCalculator;
     private final NodeVersion version;
@@ -73,7 +72,6 @@ public class QueryExplainer
             PlanFragmenter planFragmenter,
             PlannerContext plannerContext,
             AnalyzerFactory analyzerFactory,
-            StatementAnalyzerFactory statementAnalyzerFactory,
             StatsCalculator statsCalculator,
             CostCalculator costCalculator,
             NodeVersion version)
@@ -82,7 +80,6 @@ public class QueryExplainer
         this.planFragmenter = requireNonNull(planFragmenter, "planFragmenter is null");
         this.plannerContext = requireNonNull(plannerContext, "plannerContext is null");
         this.analyzerFactory = requireNonNull(analyzerFactory, "analyzerFactory is null");
-        this.statementAnalyzerFactory = requireNonNull(statementAnalyzerFactory, "statementAnalyzerFactory is null");
         this.statsCalculator = requireNonNull(statsCalculator, "statsCalculator is null");
         this.costCalculator = requireNonNull(costCalculator, "costCalculator is null");
         this.version = requireNonNull(version, "version is null");
@@ -171,7 +168,7 @@ public class QueryExplainer
                 planOptimizers,
                 idAllocator,
                 plannerContext,
-                new TypeAnalyzer(plannerContext, statementAnalyzerFactory),
+                new IrTypeAnalyzer(plannerContext),
                 statsCalculator,
                 costCalculator,
                 warningCollector,
@@ -197,39 +194,26 @@ public class QueryExplainer
             return Optional.empty();
         }
 
-        if (statement instanceof CreateCatalog) {
-            return Optional.of("CREATE CATALOG " + ((CreateCatalog) statement).getCatalogName());
-        }
-        if (statement instanceof DropCatalog) {
-            return Optional.of("DROP CATALOG " + ((DropCatalog) statement).getCatalogName());
-        }
-        if (statement instanceof CreateSchema) {
-            return Optional.of("CREATE SCHEMA " + ((CreateSchema) statement).getSchemaName());
-        }
-        if (statement instanceof DropSchema) {
-            return Optional.of("DROP SCHEMA " + ((DropSchema) statement).getSchemaName());
-        }
-        if (statement instanceof CreateTable) {
-            return Optional.of("CREATE TABLE " + ((CreateTable) statement).getName());
-        }
-        if (statement instanceof CreateView) {
-            return Optional.of("CREATE VIEW " + ((CreateView) statement).getName());
-        }
-        if (statement instanceof CreateMaterializedView) {
-            return Optional.of("CREATE MATERIALIZED VIEW " + ((CreateMaterializedView) statement).getName());
-        }
-        if (statement instanceof Prepare) {
-            return Optional.of("PREPARE " + ((Prepare) statement).getName());
-        }
+        return Optional.of(switch (statement) {
+            case CreateCatalog createCatalog -> "CREATE CATALOG " + createCatalog.getCatalogName();
+            case DropCatalog dropCatalog -> "DROP CATALOG " + dropCatalog.getCatalogName();
+            case CreateSchema createSchema -> "CREATE SCHEMA " + createSchema.getSchemaName();
+            case DropSchema dropSchema -> "DROP SCHEMA " + dropSchema.getSchemaName();
+            case CreateTable createTable -> "CREATE TABLE " + createTable.getName();
+            case CreateView createView -> "CREATE VIEW " + createView.getName();
+            case CreateMaterializedView createMaterializedView -> "CREATE MATERIALIZED VIEW " + createMaterializedView.getName();
+            case Prepare prepare -> "PREPARE " + prepare.getName();
+            default -> {
+                StringBuilder builder = new StringBuilder();
+                builder.append(SqlFormatter.formatSql(statement));
+                if (!parameters.isEmpty()) {
+                    builder.append("\n")
+                            .append("Parameters: ")
+                            .append(parameters);
+                }
 
-        StringBuilder builder = new StringBuilder();
-        builder.append(SqlFormatter.formatSql(statement));
-        if (!parameters.isEmpty()) {
-            builder.append("\n")
-                    .append("Parameters: ")
-                    .append(parameters);
-        }
-
-        return Optional.of(builder.toString());
+                yield builder.toString();
+            }
+        });
     }
 }

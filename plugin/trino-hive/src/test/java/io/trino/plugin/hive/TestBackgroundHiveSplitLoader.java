@@ -29,6 +29,7 @@ import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.filesystem.TrinoInputFile;
 import io.trino.filesystem.TrinoOutputFile;
+import io.trino.filesystem.cache.DefaultCachingHostAddressProvider;
 import io.trino.filesystem.memory.MemoryFileSystemFactory;
 import io.trino.plugin.hive.HiveColumnHandle.ColumnType;
 import io.trino.plugin.hive.fs.CachingDirectoryLister;
@@ -137,7 +138,7 @@ public class TestBackgroundHiveSplitLoader
 
     private static final String TABLE_PATH = "memory:///db_name/table_name";
     private static final Table SIMPLE_TABLE = table(TABLE_PATH, List.of(), Optional.empty(), Map.of());
-    private static final Table PARTITIONED_TABLE = table(TABLE_PATH, PARTITION_COLUMNS, Optional.of(new HiveBucketProperty(List.of("col1"), BUCKETING_V1, BUCKET_COUNT, List.of())), Map.of());
+    private static final Table PARTITIONED_TABLE = table(TABLE_PATH, PARTITION_COLUMNS, Optional.of(new HiveBucketProperty(List.of("col1"), BUCKET_COUNT, List.of())), Map.of());
 
     private final ExecutorService executor = newCachedThreadPool(daemonThreadsNamed(getClass().getSimpleName() + "-%s"));
 
@@ -793,7 +794,7 @@ public class TestBackgroundHiveSplitLoader
                 List.of(),
                 TupleDomain.all(),
                 () -> true,
-                TableToPartitionMapping.empty(),
+                ImmutableMap.of(),
                 Optional.empty(),
                 Optional.empty(),
                 DataSize.of(512, MEGABYTE),
@@ -834,7 +835,7 @@ public class TestBackgroundHiveSplitLoader
                 List.of(),
                 TupleDomain.all(),
                 () -> true,
-                TableToPartitionMapping.empty(),
+                ImmutableMap.of(),
                 Optional.empty(),
                 Optional.empty(),
                 DataSize.of(512, MEGABYTE),
@@ -853,6 +854,60 @@ public class TestBackgroundHiveSplitLoader
         assertThat(splits.size()).isEqualTo(2);
         assertThat(splits.get(0).getPath()).isEqualTo(filePath.toString());
         assertThat(splits.get(1).getPath()).isEqualTo(directoryPath.toString());
+    }
+
+    @Test
+    public void testBuildManifestFileIteratorWithCacheInvalidation()
+            throws IOException
+    {
+        CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(5, TimeUnit.MINUTES), DataSize.of(1, MEGABYTE), List.of("*"));
+        Map<String, String> schema = ImmutableMap.<String, String>builder()
+                .put(FILE_INPUT_FORMAT, SYMLINK_TEXT_INPUT_FORMAT_CLASS)
+                .put(SERIALIZATION_LIB, AVRO.getSerde())
+                .buildOrThrow();
+
+        InternalHiveSplitFactory splitFactory = new InternalHiveSplitFactory(
+                "partition",
+                AVRO,
+                schema,
+                List.of(),
+                TupleDomain.all(),
+                () -> true,
+                ImmutableMap.of(),
+                Optional.empty(),
+                Optional.empty(),
+                DataSize.of(512, MEGABYTE),
+                false,
+                Optional.empty());
+
+        Location firstFilePath = Location.of("memory:///db_name/table_name/file1");
+        List<Location> locations1 = List.of(firstFilePath);
+        BackgroundHiveSplitLoader backgroundHiveSplitLoader1 = backgroundHiveSplitLoader(
+                locations1,
+                directoryLister);
+        Iterator<InternalHiveSplit> splitIterator1 = backgroundHiveSplitLoader1.buildManifestFileIterator(
+                splitFactory,
+                Location.of(TABLE_PATH),
+                locations1,
+                true);
+        List<InternalHiveSplit> splits1 = ImmutableList.copyOf(splitIterator1);
+        assertThat(splits1.size()).isEqualTo(1);
+        assertThat(splits1.get(0).getPath()).isEqualTo(firstFilePath.toString());
+
+        Location secondFilePath = Location.of("memory:///db_name/table_name/file2");
+        List<Location> locations2 = List.of(firstFilePath, secondFilePath);
+        BackgroundHiveSplitLoader backgroundHiveSplitLoader2 = backgroundHiveSplitLoader(
+                locations2,
+                directoryLister);
+        Iterator<InternalHiveSplit> splitIterator2 = backgroundHiveSplitLoader2.buildManifestFileIterator(
+                splitFactory,
+                Location.of(TABLE_PATH),
+                locations2,
+                true);
+        List<InternalHiveSplit> splits2 = ImmutableList.copyOf(splitIterator2);
+        assertThat(splits2.size()).isEqualTo(2);
+        assertThat(splits2.get(0).getPath()).isEqualTo(firstFilePath.toString());
+        assertThat(splits2.get(1).getPath()).isEqualTo(secondFilePath.toString());
     }
 
     @Test
@@ -940,7 +995,7 @@ public class TestBackgroundHiveSplitLoader
         return new HivePartitionMetadata(
                 new HivePartition(SIMPLE_TABLE.getSchemaTableName()),
                 Optional.empty(),
-                TableToPartitionMapping.empty());
+                ImmutableMap.of());
     }
 
     private static void createOrcAcidFile(TrinoFileSystem fileSystem, Location location)
@@ -1102,7 +1157,7 @@ public class TestBackgroundHiveSplitLoader
                         new HivePartitionMetadata(
                                 new HivePartition(new SchemaTableName("testSchema", "table_name")),
                                 Optional.empty(),
-                                TableToPartitionMapping.empty()));
+                                ImmutableMap.of()));
 
         return new BackgroundHiveSplitLoader(
                 table,
@@ -1133,7 +1188,7 @@ public class TestBackgroundHiveSplitLoader
                 new HivePartitionMetadata(
                         new HivePartition(new SchemaTableName("testSchema", "table_name")),
                         Optional.empty(),
-                        TableToPartitionMapping.empty()));
+                        ImmutableMap.of()));
         return backgroundHiveSplitLoader(partitions, locations, directoryLister, 100);
     }
 
@@ -1209,7 +1264,7 @@ public class TestBackgroundHiveSplitLoader
             {
                 position++;
                 return switch (position) {
-                    case 0 -> new HivePartitionMetadata(new HivePartition(new SchemaTableName("testSchema", "table_name")), Optional.empty(), TableToPartitionMapping.empty());
+                    case 0 -> new HivePartitionMetadata(new HivePartition(new SchemaTableName("testSchema", "table_name")), Optional.empty(), ImmutableMap.of());
                     case 1 -> throw new RuntimeException("OFFLINE");
                     default -> endOfData();
                 };
@@ -1230,6 +1285,7 @@ public class TestBackgroundHiveSplitLoader
                 hiveSplitLoader,
                 executor,
                 new CounterStat(),
+                new DefaultCachingHostAddressProvider(),
                 false);
     }
 

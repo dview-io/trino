@@ -26,7 +26,6 @@ import java.util.Map;
 
 import static io.trino.tempto.Requirements.compose;
 import static io.trino.tempto.fulfillment.table.MutableTableRequirement.State.CREATED;
-import static io.trino.tests.product.TestGroups.HIVE_COERCION;
 import static io.trino.tests.product.TestGroups.JDBC;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
@@ -53,17 +52,29 @@ public class TestHiveCoercionOnUnpartitionedTable
                             list_to_list                       ARRAY<STRUCT<ti2int: TINYINT, si2bi: SMALLINT, bi2vc: BIGINT, remove: STRING>>,
                             map_to_map                         MAP<TINYINT, STRUCT<ti2bi: TINYINT, int2bi: INT, float2double: FLOAT>>,
                             boolean_to_varchar                 BOOLEAN,
+                            string_to_boolean                  STRING,
+                            special_string_to_boolean          STRING,
+                            numeric_string_to_boolean          STRING,
+                            varchar_to_boolean                 VARCHAR(5),
                             tinyint_to_smallint                TINYINT,
                             tinyint_to_int                     TINYINT,
                             tinyint_to_bigint                  TINYINT,
                             tinyint_to_double                  TINYINT,
+                            tinyint_to_shortdecimal            TINYINT,
+                            tinyint_to_longdecimal             TINYINT,
                             smallint_to_int                    SMALLINT,
                             smallint_to_bigint                 SMALLINT,
                             smallint_to_double                 SMALLINT,
+                            smallint_to_shortdecimal           SMALLINT,
+                            smallint_to_longdecimal            SMALLINT,
                             int_to_bigint                      INT,
                             int_to_double                      INT,
+                            int_to_shortdecimal                INT,
+                            int_to_longdecimal                 INT,
                             bigint_to_double                   BIGINT,
                             bigint_to_varchar                  BIGINT,
+                            bigint_to_shortdecimal             BIGINT,
+                            bigint_to_longdecimal              BIGINT,
                             float_to_double                    FLOAT,
                             double_to_float                    DOUBLE,
                             double_to_string                   DOUBLE,
@@ -91,16 +102,33 @@ public class TestHiveCoercionOnUnpartitionedTable
                             long_decimal_to_varchar            DECIMAL(20,12),
                             short_decimal_to_bounded_varchar   DECIMAL(10,5),
                             long_decimal_to_bounded_varchar    DECIMAL(20,12),
+                            varchar_to_tinyint                 VARCHAR(4),
+                            string_to_tinyint                  STRING,
+                            varchar_to_smallint                VARCHAR(6),
+                            string_to_smallint                 STRING,
+                            varchar_to_integer                 VARCHAR(11),
+                            string_to_integer                  STRING,
+                            varchar_to_bigint                  VARCHAR(40),
+                            string_to_bigint                   STRING,
                             varchar_to_bigger_varchar          VARCHAR(3),
                             varchar_to_smaller_varchar         VARCHAR(3),
                             varchar_to_date                    VARCHAR(10),
                             varchar_to_distant_date            VARCHAR(12),
+                            varchar_to_float                   VARCHAR(40),
+                            string_to_float                    STRING,
+                            varchar_to_float_infinity          VARCHAR(40),
+                            varchar_to_special_float           VARCHAR(40),
                             varchar_to_double                  VARCHAR(40),
                             string_to_double                   STRING,
                             varchar_to_double_infinity         VARCHAR(40),
                             varchar_to_special_double          VARCHAR(40),
+                            date_to_string                     DATE,
+                            date_to_bounded_varchar            DATE,
                             char_to_bigger_char                CHAR(3),
                             char_to_smaller_char               CHAR(3),
+                            string_to_char                     STRING,
+                            varchar_to_bigger_char             VARCHAR(4),
+                            varchar_to_smaller_char            VARCHAR(20),
                             timestamp_millis_to_date           TIMESTAMP,
                             timestamp_micros_to_date           TIMESTAMP,
                             timestamp_nanos_to_date            TIMESTAMP,
@@ -142,14 +170,14 @@ public class TestHiveCoercionOnUnpartitionedTable
     }
 
     @Requires(OrcRequirements.class)
-    @Test(groups = {HIVE_COERCION, JDBC})
+    @Test(groups = JDBC)
     public void testHiveCoercionOrc()
     {
         doTestHiveCoercion(HIVE_COERCION_ORC);
     }
 
     @Requires(OrcRequirements.class)
-    @Test(groups = {HIVE_COERCION, JDBC})
+    @Test(groups = JDBC)
     public void testHiveCoercionWithDifferentTimestampPrecision()
     {
         doTestHiveCoercionWithDifferentTimestampPrecision(HIVE_TIMESTAMP_COERCION_ORC);

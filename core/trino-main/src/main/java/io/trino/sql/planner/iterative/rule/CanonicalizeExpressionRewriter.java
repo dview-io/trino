@@ -22,7 +22,7 @@ import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 import io.trino.sql.PlannerContext;
-import io.trino.sql.planner.TypeAnalyzer;
+import io.trino.sql.planner.IrTypeAnalyzer;
 import io.trino.sql.planner.TypeProvider;
 import io.trino.sql.tree.ArithmeticBinaryExpression;
 import io.trino.sql.tree.Cast;
@@ -34,33 +34,31 @@ import io.trino.sql.tree.FunctionCall;
 import io.trino.sql.tree.IfExpression;
 import io.trino.sql.tree.IsNotNullPredicate;
 import io.trino.sql.tree.IsNullPredicate;
-import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.NotExpression;
 import io.trino.sql.tree.SearchedCaseExpression;
 import io.trino.sql.tree.SymbolReference;
 import io.trino.sql.tree.WhenClause;
 
-import java.util.Map;
 import java.util.Optional;
 
 import static io.trino.metadata.GlobalFunctionCatalog.builtinFunctionName;
 import static io.trino.metadata.ResolvedFunction.extractFunctionName;
-import static io.trino.sql.ExpressionUtils.isEffectivelyLiteral;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
+import static io.trino.sql.ir.IrUtils.isEffectivelyLiteral;
 import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.ADD;
 import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.MULTIPLY;
 import static java.util.Objects.requireNonNull;
 
 public final class CanonicalizeExpressionRewriter
 {
-    public static Expression canonicalizeExpression(Expression expression, Map<NodeRef<Expression>, Type> expressionTypes, PlannerContext plannerContext, Session session)
+    public static Expression canonicalizeExpression(Expression expression, IrTypeAnalyzer typeAnalyzer, TypeProvider types, PlannerContext plannerContext, Session session)
     {
-        return ExpressionTreeRewriter.rewriteWith(new Visitor(session, plannerContext, expressionTypes), expression);
+        return ExpressionTreeRewriter.rewriteWith(new Visitor(session, plannerContext, typeAnalyzer, types), expression);
     }
 
     private CanonicalizeExpressionRewriter() {}
 
-    public static Expression rewrite(Expression expression, Session session, PlannerContext plannerContext, TypeAnalyzer typeAnalyzer, TypeProvider types)
+    public static Expression rewrite(Expression expression, Session session, PlannerContext plannerContext, IrTypeAnalyzer typeAnalyzer, TypeProvider types)
     {
         requireNonNull(plannerContext, "plannerContext is null");
         requireNonNull(typeAnalyzer, "typeAnalyzer is null");
@@ -68,9 +66,8 @@ public final class CanonicalizeExpressionRewriter
         if (expression instanceof SymbolReference) {
             return expression;
         }
-        Map<NodeRef<Expression>, Type> expressionTypes = typeAnalyzer.getTypes(session, types, expression);
 
-        return ExpressionTreeRewriter.rewriteWith(new Visitor(session, plannerContext, expressionTypes), expression);
+        return ExpressionTreeRewriter.rewriteWith(new Visitor(session, plannerContext, typeAnalyzer, types), expression);
     }
 
     private static class Visitor
@@ -78,15 +75,18 @@ public final class CanonicalizeExpressionRewriter
     {
         private final Session session;
         private final PlannerContext plannerContext;
-        private final Map<NodeRef<Expression>, Type> expressionTypes;
+        private final IrTypeAnalyzer typeAnalyzer;
+        private final TypeProvider types;
 
-        public Visitor(Session session, PlannerContext plannerContext, Map<NodeRef<Expression>, Type> expressionTypes)
+        public Visitor(Session session, PlannerContext plannerContext, IrTypeAnalyzer typeAnalyzer, TypeProvider types)
         {
             this.session = session;
             this.plannerContext = plannerContext;
-            this.expressionTypes = expressionTypes;
+            this.typeAnalyzer = typeAnalyzer;
+            this.types = types;
         }
 
+        @SuppressWarnings("ArgumentSelectionDefectChecker")
         @Override
         public Expression rewriteComparisonExpression(ComparisonExpression node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
         {
@@ -99,6 +99,7 @@ public final class CanonicalizeExpressionRewriter
             return treeRewriter.defaultRewrite(node, context);
         }
 
+        @SuppressWarnings("ArgumentSelectionDefectChecker")
         @Override
         public Expression rewriteArithmeticBinary(ArithmeticBinaryExpression node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
         {
@@ -137,7 +138,7 @@ public final class CanonicalizeExpressionRewriter
             CatalogSchemaFunctionName functionName = extractFunctionName(node.getName());
             if (functionName.equals(builtinFunctionName("date")) && node.getArguments().size() == 1) {
                 Expression argument = node.getArguments().get(0);
-                Type argumentType = expressionTypes.get(NodeRef.of(argument));
+                Type argumentType = typeAnalyzer.getType(session, types, argument);
                 if (argumentType instanceof TimestampType
                         || argumentType instanceof TimestampWithTimeZoneType
                         || argumentType instanceof VarcharType) {

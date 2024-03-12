@@ -1,4 +1,4 @@
-# Release xyz (dd MMM 2023)
+# Release xyz (dd MMM 2024)
 
 ## General
 
@@ -77,6 +77,8 @@
 ## Redshift connector
 
 ## SingleStore connector
+
+## Snowflake connector
 
 ## SQL Server connector
 

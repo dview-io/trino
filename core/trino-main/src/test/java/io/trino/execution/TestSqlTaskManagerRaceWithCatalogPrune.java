@@ -22,6 +22,7 @@ import io.airlift.node.NodeInfo;
 import io.airlift.stats.TestingGcMonitor;
 import io.airlift.tracing.Tracing;
 import io.airlift.units.Duration;
+import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.trino.Session;
 import io.trino.connector.CatalogConnector;
@@ -53,7 +54,7 @@ import io.trino.testing.TestingConnectorContext;
 import io.trino.testing.TestingSession;
 import io.trino.transaction.NoOpTransactionManager;
 import io.trino.transaction.TransactionInfo;
-import io.trino.version.EmbedVersion;
+import io.trino.util.EmbedVersion;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -263,7 +264,7 @@ public class TestSqlTaskManagerRaceWithCatalogPrune
                 new NodeSpillConfig(),
                 new TestingGcMonitor(),
                 noopTracer(),
-                new ExchangeManagerRegistry(),
+                new ExchangeManagerRegistry(OpenTelemetry.noop(), Tracing.noopTracer()),
                 ignore -> true);
     }
 

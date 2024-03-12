@@ -24,7 +24,6 @@ import com.google.common.collect.Sets;
 import io.trino.spi.connector.SortOrder;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeManager;
-import io.trino.sql.ExpressionUtils;
 import io.trino.sql.PlannerContext;
 import io.trino.sql.planner.OrderingScheme;
 import io.trino.sql.planner.Symbol;
@@ -35,7 +34,6 @@ import io.trino.sql.planner.iterative.Lookup;
 import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.Assignments;
 import io.trino.sql.planner.plan.DataOrganizationSpecification;
-import io.trino.sql.planner.plan.EnforceSingleRowNode;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.PlanNode;
@@ -62,6 +60,9 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toTypeSignature;
+import static io.trino.sql.ir.IrUtils.and;
+import static io.trino.sql.ir.IrUtils.combineConjuncts;
+import static io.trino.sql.ir.IrUtils.extractConjuncts;
 import static io.trino.sql.planner.DeterminismEvaluator.isDeterministic;
 import static io.trino.sql.planner.optimizations.SymbolMapper.symbolMapper;
 import static io.trino.sql.planner.plan.AggregationNode.singleAggregation;
@@ -153,7 +154,7 @@ public class PlanNodeDecorrelator
             }
 
             Expression predicate = node.getPredicate();
-            Map<Boolean, List<Expression>> predicates = ExpressionUtils.extractConjuncts(predicate).stream()
+            Map<Boolean, List<Expression>> predicates = extractConjuncts(predicate).stream()
                     .collect(Collectors.partitioningBy(PlanNodeDecorrelator.DecorrelatingVisitor.this::isCorrelated));
             List<Expression> correlatedPredicates = ImmutableList.copyOf(predicates.get(true));
             List<Expression> uncorrelatedPredicates = ImmutableList.copyOf(predicates.get(false));
@@ -162,7 +163,7 @@ public class PlanNodeDecorrelator
             FilterNode newFilterNode = new FilterNode(
                     node.getId(),
                     childDecorrelationResult.node,
-                    ExpressionUtils.combineConjuncts(plannerContext.getMetadata(), uncorrelatedPredicates));
+                    combineConjuncts(plannerContext.getMetadata(), uncorrelatedPredicates));
 
             Set<Symbol> symbolsToPropagate = Sets.difference(SymbolsExtractor.extractUnique(correlatedPredicates), ImmutableSet.copyOf(correlation));
             return Optional.of(new DecorrelationResult(
@@ -392,18 +393,11 @@ public class PlanNodeDecorrelator
         }
 
         @Override
-        public Optional<DecorrelationResult> visitEnforceSingleRow(EnforceSingleRowNode node, Void context)
-        {
-            Optional<DecorrelationResult> childDecorrelationResultOptional = node.getSource().accept(this, null);
-            return childDecorrelationResultOptional.filter(result -> result.atMostSingleRow);
-        }
-
-        @Override
         public Optional<DecorrelationResult> visitAggregation(AggregationNode node, Void context)
         {
             // Aggregation with global grouping cannot be converted to aggregation grouped on constants.
             // Theoretically, if there are no constants to group on, the aggregation could be successfully decorrelated.
-            // However, it can only happen in the when where Aggregation's source plan is not correlated.
+            // However, it can only happen when Aggregation's source plan is not correlated.
             // Then:
             // - either we should not reach here because uncorrelated subplans of correlated filters are not explored,
             // - or the aggregation contains correlation which is unresolvable. This is indicated by returning Optional.empty().
@@ -653,7 +647,7 @@ public class PlanNodeDecorrelator
             if (correlatedPredicates.isEmpty()) {
                 return Optional.empty();
             }
-            return Optional.of(ExpressionUtils.and(correlatedPredicates));
+            return Optional.of(and(correlatedPredicates));
         }
 
         public PlanNode getNode()

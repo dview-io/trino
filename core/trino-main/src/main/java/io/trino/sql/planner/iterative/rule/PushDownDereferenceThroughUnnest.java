@@ -18,8 +18,8 @@ import com.google.common.collect.ImmutableList;
 import io.trino.matching.Capture;
 import io.trino.matching.Captures;
 import io.trino.matching.Pattern;
+import io.trino.sql.planner.IrTypeAnalyzer;
 import io.trino.sql.planner.Symbol;
-import io.trino.sql.planner.TypeAnalyzer;
 import io.trino.sql.planner.iterative.Rule;
 import io.trino.sql.planner.plan.Assignments;
 import io.trino.sql.planner.plan.ProjectNode;
@@ -63,9 +63,9 @@ public class PushDownDereferenceThroughUnnest
         implements Rule<ProjectNode>
 {
     private static final Capture<UnnestNode> CHILD = newCapture();
-    private final TypeAnalyzer typeAnalyzer;
+    private final IrTypeAnalyzer typeAnalyzer;
 
-    public PushDownDereferenceThroughUnnest(TypeAnalyzer typeAnalyzer)
+    public PushDownDereferenceThroughUnnest(IrTypeAnalyzer typeAnalyzer)
     {
         this.typeAnalyzer = requireNonNull(typeAnalyzer, "typeAnalyzer is null");
     }
@@ -85,7 +85,6 @@ public class PushDownDereferenceThroughUnnest
         // Extract dereferences from project node's assignments and unnest node's filter
         ImmutableList.Builder<Expression> expressionsBuilder = ImmutableList.builder();
         expressionsBuilder.addAll(projectNode.getAssignments().getExpressions());
-        unnestNode.getFilter().ifPresent(expressionsBuilder::add);
 
         // Extract dereferences for pushdown
         Set<SubscriptExpression> dereferences = extractRowSubscripts(expressionsBuilder.build(), false, context.getSession(), typeAnalyzer, context.getSymbolAllocator().getTypes());
@@ -131,8 +130,7 @@ public class PushDownDereferenceThroughUnnest
                                         .build(),
                                 unnestNode.getMappings(),
                                 unnestNode.getOrdinalitySymbol(),
-                                unnestNode.getJoinType(),
-                                unnestNode.getFilter().map(filter -> replaceExpression(filter, mappings))),
+                                unnestNode.getJoinType()),
                         newAssignments));
     }
 }

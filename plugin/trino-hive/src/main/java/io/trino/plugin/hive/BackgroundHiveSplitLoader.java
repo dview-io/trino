@@ -108,6 +108,7 @@ import static io.trino.plugin.hive.util.AcidTables.getAcidState;
 import static io.trino.plugin.hive.util.AcidTables.isFullAcidTable;
 import static io.trino.plugin.hive.util.AcidTables.isTransactionalTable;
 import static io.trino.plugin.hive.util.AcidTables.readAcidVersionFile;
+import static io.trino.plugin.hive.util.HiveBucketing.getBucketingVersion;
 import static io.trino.plugin.hive.util.HiveClassNames.SYMLINK_TEXT_INPUT_FORMAT_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.checkCondition;
 import static io.trino.plugin.hive.util.HiveUtil.getDeserializerClassName;
@@ -419,7 +420,7 @@ public class BackgroundHiveSplitLoader
                     partitionKeys,
                     effectivePredicate,
                     partitionMatchSupplier,
-                    partition.getTableToPartitionMapping(),
+                    partition.getHiveColumnCoercions(),
                     Optional.empty(),
                     Optional.empty(),
                     getMaxInitialSplitSize(session),
@@ -444,7 +445,8 @@ public class BackgroundHiveSplitLoader
             Optional<HiveBucketProperty> partitionBucketProperty = partition.getPartition().get().getStorage().getBucketProperty();
             if (tableBucketInfo.isPresent() && partitionBucketProperty.isPresent()) {
                 int tableBucketCount = tableBucketInfo.get().getTableBucketCount();
-                BucketingVersion bucketingVersion = partitionBucketProperty.get().getBucketingVersion(); // TODO can partition's bucketing_version be different from table's?
+                // Partition bucketing_version cannot be different from table
+                BucketingVersion bucketingVersion = getBucketingVersion(table.getParameters());
                 int partitionBucketCount = partitionBucketProperty.get().getBucketCount();
                 // Validation was done in HiveSplitManager#getPartitionMetadata.
                 // Here, it's just trying to see if its needs the BucketConversion.
@@ -470,7 +472,7 @@ public class BackgroundHiveSplitLoader
                 partitionKeys,
                 effectivePredicate,
                 partitionMatchSupplier,
-                partition.getTableToPartitionMapping(),
+                partition.getHiveColumnCoercions(),
                 bucketConversionRequiresWorkerParticipation ? bucketConversion : Optional.empty(),
                 bucketValidation,
                 getMaxInitialSplitSize(session),
@@ -512,7 +514,14 @@ public class BackgroundHiveSplitLoader
     @VisibleForTesting
     Iterator<InternalHiveSplit> buildManifestFileIterator(InternalHiveSplitFactory splitFactory, Location location, List<Location> paths, boolean splittable)
     {
+        return createInternalHiveSplitIterator(splitFactory, splittable, Optional.empty(), verifiedFileStatusesStream(location, paths));
+    }
+
+    private Stream<TrinoFileStatus> verifiedFileStatusesStream(Location location, List<Location> paths)
+    {
         TrinoFileSystem trinoFileSystem = fileSystemFactory.create(session);
+        // Check if location is cached BEFORE using the directoryLister
+        boolean isCached = directoryLister.isCached(location);
 
         Map<String, TrinoFileStatus> fileStatuses = new HashMap<>();
         Iterator<TrinoFileStatus> fileStatusIterator = new HiveFileIterator(table, location, trinoFileSystem, directoryLister, RECURSE);
@@ -520,7 +529,22 @@ public class BackgroundHiveSplitLoader
             checkPartitionLocationExists(trinoFileSystem, location);
         }
         fileStatusIterator.forEachRemaining(status -> fileStatuses.put(Location.of(status.getPath()).path(), status));
-        Stream<TrinoFileStatus> fileStream = paths.stream()
+
+        // If file statuses came from cache verify that all are present
+        if (isCached) {
+            boolean missing = paths.stream()
+                    .anyMatch(path -> !fileStatuses.containsKey(path.path()));
+            // Invalidate the cache and reload
+            if (missing) {
+                directoryLister.invalidate(location);
+
+                fileStatuses.clear();
+                fileStatusIterator = new HiveFileIterator(table, location, trinoFileSystem, directoryLister, RECURSE);
+                fileStatusIterator.forEachRemaining(status -> fileStatuses.put(Location.of(status.getPath()).path(), status));
+            }
+        }
+
+        return paths.stream()
                 .map(path -> {
                     TrinoFileStatus status = fileStatuses.get(path.path());
                     if (status == null) {
@@ -528,7 +552,6 @@ public class BackgroundHiveSplitLoader
                     }
                     return status;
                 });
-        return createInternalHiveSplitIterator(splitFactory, splittable, Optional.empty(), fileStream);
     }
 
     private ListenableFuture<Void> getTransactionalSplits(Location path, boolean splittable, Optional<BucketConversion> bucketConversion, InternalHiveSplitFactory splitFactory)

@@ -26,10 +26,10 @@ import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SortOrder;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
+import io.trino.sql.parser.SqlParser;
 import io.trino.sql.planner.PartitioningHandle;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.iterative.GroupReference;
-import io.trino.sql.planner.iterative.rule.test.PlanBuilder;
 import io.trino.sql.planner.optimizations.SymbolMapper;
 import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.AggregationNode.Step;
@@ -42,12 +42,13 @@ import io.trino.sql.planner.plan.EnforceSingleRowNode;
 import io.trino.sql.planner.plan.ExceptNode;
 import io.trino.sql.planner.plan.ExchangeNode;
 import io.trino.sql.planner.plan.FilterNode;
+import io.trino.sql.planner.plan.FrameBoundType;
 import io.trino.sql.planner.plan.GroupIdNode;
 import io.trino.sql.planner.plan.IndexJoinNode;
 import io.trino.sql.planner.plan.IndexSourceNode;
 import io.trino.sql.planner.plan.IntersectNode;
 import io.trino.sql.planner.plan.JoinNode;
-import io.trino.sql.planner.plan.JoinNode.Type;
+import io.trino.sql.planner.plan.JoinType;
 import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.MergeWriterNode;
@@ -65,17 +66,17 @@ import io.trino.sql.planner.plan.TopNNode;
 import io.trino.sql.planner.plan.UnionNode;
 import io.trino.sql.planner.plan.UnnestNode;
 import io.trino.sql.planner.plan.ValuesNode;
+import io.trino.sql.planner.plan.WindowFrameType;
 import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.ComparisonExpression;
+import io.trino.sql.tree.DataType;
 import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.FrameBound;
 import io.trino.sql.tree.FunctionCall;
 import io.trino.sql.tree.NotExpression;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.SortItem;
 import io.trino.sql.tree.WindowFrame;
-import org.intellij.lang.annotations.Language;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -99,7 +100,7 @@ import static io.trino.sql.planner.assertions.MatchResult.NO_MATCH;
 import static io.trino.sql.planner.assertions.MatchResult.match;
 import static io.trino.sql.planner.assertions.StrictAssignedSymbolsMatcher.actualAssignments;
 import static io.trino.sql.planner.assertions.StrictSymbolsMatcher.actualOutputs;
-import static io.trino.sql.planner.plan.JoinNode.Type.INNER;
+import static io.trino.sql.planner.plan.JoinType.INNER;
 import static io.trino.sql.tree.ComparisonExpression.Operator.IS_DISTINCT_FROM;
 import static io.trino.sql.tree.SortItem.NullOrdering.FIRST;
 import static io.trino.sql.tree.SortItem.NullOrdering.UNDEFINED;
@@ -250,7 +251,7 @@ public final class PlanMatchPattern
     }
 
     public static PlanMatchPattern aggregation(
-            Map<String, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<String, ExpectedValueProvider<AggregationFunction>> aggregations,
             PlanMatchPattern source)
     {
         PlanMatchPattern result = node(AggregationNode.class, source);
@@ -260,7 +261,7 @@ public final class PlanMatchPattern
     }
 
     public static PlanMatchPattern aggregation(
-            Map<String, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<String, ExpectedValueProvider<AggregationFunction>> aggregations,
             Step step,
             PlanMatchPattern source)
     {
@@ -271,7 +272,7 @@ public final class PlanMatchPattern
     }
 
     public static PlanMatchPattern aggregation(
-            Map<String, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<String, ExpectedValueProvider<AggregationFunction>> aggregations,
             Predicate<AggregationNode> predicate,
             PlanMatchPattern source)
     {
@@ -284,7 +285,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern aggregation(
             GroupingSetDescriptor groupingSets,
-            Map<Optional<String>, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<Optional<String>, ExpectedValueProvider<AggregationFunction>> aggregations,
             Optional<Symbol> groupId,
             Step step,
             PlanMatchPattern source)
@@ -294,7 +295,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern aggregation(
             GroupingSetDescriptor groupingSets,
-            Map<Optional<String>, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<Optional<String>, ExpectedValueProvider<AggregationFunction>> aggregations,
             List<String> preGroupedSymbols,
             Optional<Symbol> groupId,
             Step step,
@@ -305,7 +306,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern aggregation(
             GroupingSetDescriptor groupingSets,
-            Map<Optional<String>, ExpectedValueProvider<FunctionCall>> aggregations,
+            Map<Optional<String>, ExpectedValueProvider<AggregationFunction>> aggregations,
             List<String> preGroupedSymbols,
             List<String> masks,
             Optional<Symbol> groupId,
@@ -358,10 +359,10 @@ public final class PlanMatchPattern
     }
 
     public static ExpectedValueProvider<WindowNode.Frame> windowFrame(
-            WindowFrame.Type type,
-            FrameBound.Type startType,
+            WindowFrameType type,
+            FrameBoundType startType,
             Optional<String> startValue,
-            FrameBound.Type endType,
+            FrameBoundType endType,
             Optional<String> endValue,
             Optional<String> sortKey)
     {
@@ -369,11 +370,11 @@ public final class PlanMatchPattern
     }
 
     public static ExpectedValueProvider<WindowNode.Frame> windowFrame(
-            WindowFrame.Type type,
-            FrameBound.Type startType,
+            WindowFrameType type,
+            FrameBoundType startType,
             Optional<String> startValue,
             Optional<String> sortKeyForStartComparison,
-            FrameBound.Type endType,
+            FrameBoundType endType,
             Optional<String> endValue,
             Optional<String> sortKeyForEndComparison)
     {
@@ -415,7 +416,7 @@ public final class PlanMatchPattern
         return builder.build();
     }
 
-    public static PlanMatchPattern join(JoinNode.Type type, Consumer<JoinMatcher.Builder> handler)
+    public static PlanMatchPattern join(JoinType type, Consumer<JoinMatcher.Builder> handler)
     {
         JoinMatcher.Builder builder = new JoinMatcher.Builder(type);
         handler.accept(builder);
@@ -509,26 +510,26 @@ public final class PlanMatchPattern
         return node(SemiJoinNode.class, source, filtering).with(new SemiJoinMatcher(sourceSymbolAlias, filteringSymbolAlias, outputAlias, distributionType, hasDynamicFilter));
     }
 
-    public static PlanMatchPattern spatialJoin(@Language("SQL") String expectedFilter, PlanMatchPattern left, PlanMatchPattern right)
+    public static PlanMatchPattern spatialJoin(Expression expectedFilter, PlanMatchPattern left, PlanMatchPattern right)
     {
         return spatialJoin(expectedFilter, Optional.empty(), left, right);
     }
 
-    public static PlanMatchPattern spatialJoin(@Language("SQL") String expectedFilter, Optional<String> kdbTree, PlanMatchPattern left, PlanMatchPattern right)
+    public static PlanMatchPattern spatialJoin(Expression expectedFilter, Optional<String> kdbTree, PlanMatchPattern left, PlanMatchPattern right)
     {
         return spatialJoin(expectedFilter, kdbTree, Optional.empty(), left, right);
     }
 
-    public static PlanMatchPattern spatialJoin(@Language("SQL") String expectedFilter, Optional<String> kdbTree, Optional<List<String>> outputSymbols, PlanMatchPattern left, PlanMatchPattern right)
+    public static PlanMatchPattern spatialJoin(Expression filter, Optional<String> kdbTree, Optional<List<String>> outputSymbols, PlanMatchPattern left, PlanMatchPattern right)
     {
         return node(SpatialJoinNode.class, left, right).with(
-                new SpatialJoinMatcher(SpatialJoinNode.Type.INNER, PlanBuilder.expression(expectedFilter), kdbTree, outputSymbols));
+                new SpatialJoinMatcher(SpatialJoinNode.Type.INNER, filter, kdbTree, outputSymbols));
     }
 
-    public static PlanMatchPattern spatialLeftJoin(@Language("SQL") String expectedFilter, PlanMatchPattern left, PlanMatchPattern right)
+    public static PlanMatchPattern spatialLeftJoin(Expression expectedFilter, PlanMatchPattern left, PlanMatchPattern right)
     {
         return node(SpatialJoinNode.class, left, right).with(
-                new SpatialJoinMatcher(SpatialJoinNode.Type.LEFT, PlanBuilder.expression(expectedFilter), Optional.empty(), Optional.empty()));
+                new SpatialJoinMatcher(SpatialJoinNode.Type.LEFT, expectedFilter, Optional.empty(), Optional.empty()));
     }
 
     public static PlanMatchPattern unnest(PlanMatchPattern source)
@@ -538,15 +539,14 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern unnest(List<String> replicateSymbols, List<UnnestMapping> mappings, PlanMatchPattern source)
     {
-        return unnest(replicateSymbols, mappings, Optional.empty(), INNER, Optional.empty(), source);
+        return unnest(replicateSymbols, mappings, Optional.empty(), INNER, source);
     }
 
     public static PlanMatchPattern unnest(
             List<String> replicateSymbols,
             List<UnnestMapping> mappings,
             Optional<String> ordinalitySymbol,
-            Type type,
-            Optional<String> filter,
+            JoinType type,
             PlanMatchPattern source)
     {
         PlanMatchPattern result = node(UnnestNode.class, source)
@@ -554,8 +554,7 @@ public final class PlanMatchPattern
                         replicateSymbols,
                         mappings,
                         ordinalitySymbol,
-                        type,
-                        filter.map(predicate -> PlanBuilder.expression(predicate))));
+                        type));
 
         mappings.forEach(mapping -> {
             for (int i = 0; i < mapping.getOutputs().size(); i++) {
@@ -636,6 +635,11 @@ public final class PlanMatchPattern
         return exchange(scope, Optional.empty(), Optional.of(partitioningHandle), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
     }
 
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, PartitioningHandle partitioningHandle, Optional<Integer> partitionCount, PlanMatchPattern... sources)
+    {
+        return exchange(scope, Optional.of(type), Optional.of(partitioningHandle), ImmutableList.of(), ImmutableSet.of(), Optional.empty(), ImmutableList.of(), Optional.of(partitionCount), sources);
+    }
+
     public static PlanMatchPattern exchange(
             ExchangeNode.Scope scope,
             Optional<ExchangeNode.Type> type,
@@ -706,11 +710,6 @@ public final class PlanMatchPattern
         return new SymbolAlias(alias);
     }
 
-    public static PlanMatchPattern filter(@Language("SQL") String expectedPredicate, PlanMatchPattern source)
-    {
-        return filter(PlanBuilder.expression(expectedPredicate), source);
-    }
-
     public static PlanMatchPattern filter(Expression expectedPredicate, PlanMatchPattern source)
     {
         return node(FilterNode.class, source).with(new FilterMatcher(expectedPredicate, Optional.empty()));
@@ -721,7 +720,7 @@ public final class PlanMatchPattern
         return node(FilterNode.class, source).with(new FilterMatcher(expectedPredicate, Optional.of(dynamicFilter)));
     }
 
-    public static PlanMatchPattern apply(List<String> correlationSymbolAliases, Map<String, ExpressionMatcher> subqueryAssignments, PlanMatchPattern inputPattern, PlanMatchPattern subqueryPattern)
+    public static PlanMatchPattern apply(List<String> correlationSymbolAliases, Map<String, SetExpressionMatcher> subqueryAssignments, PlanMatchPattern inputPattern, PlanMatchPattern subqueryPattern)
     {
         PlanMatchPattern result = node(ApplyNode.class, inputPattern, subqueryPattern)
                 .with(new CorrelationMatcher(correlationSymbolAliases));
@@ -736,10 +735,10 @@ public final class PlanMatchPattern
                 .with(new CorrelationMatcher(correlationSymbolAliases));
     }
 
-    public static PlanMatchPattern correlatedJoin(List<String> correlationSymbolAliases, @Language("SQL") String filter, PlanMatchPattern inputPattern, PlanMatchPattern subqueryPattern)
+    public static PlanMatchPattern correlatedJoin(List<String> correlationSymbolAliases, Expression filter, PlanMatchPattern inputPattern, PlanMatchPattern subqueryPattern)
     {
         return correlatedJoin(correlationSymbolAliases, inputPattern, subqueryPattern)
-                .with(new CorrelatedJoinMatcher(PlanBuilder.expression(filter)));
+                .with(new CorrelatedJoinMatcher(filter));
     }
 
     public static PlanMatchPattern groupId(List<List<String>> groupingSets, String groupIdSymbol, PlanMatchPattern source)
@@ -1006,26 +1005,10 @@ public final class PlanMatchPattern
         return this;
     }
 
-    /*
-     * withExactAssignments and withExactAssignedOutputs are needed for matching symbols
-     * that are produced in the node that you're matching. The name of the symbol bound to
-     * the alias is *not* known when the Matcher is run, and so you need to match by what
-     * is being assigned to it.
-     */
-    public PlanMatchPattern withExactAssignedOutputs(RvalueMatcher... expectedAliases)
-    {
-        return withExactAssignedOutputs(ImmutableList.copyOf(expectedAliases));
-    }
-
     public PlanMatchPattern withExactAssignedOutputs(Collection<? extends RvalueMatcher> expectedAliases)
     {
         matchers.add(new StrictAssignedSymbolsMatcher(actualOutputs(), expectedAliases));
         return this;
-    }
-
-    public PlanMatchPattern withExactAssignments(RvalueMatcher... expectedAliases)
-    {
-        return withExactAssignments(ImmutableList.copyOf(expectedAliases));
     }
 
     public PlanMatchPattern withExactAssignments(Collection<? extends RvalueMatcher> expectedAliases)
@@ -1045,19 +1028,20 @@ public final class PlanMatchPattern
         return new ColumnReference(tableName, columnName);
     }
 
-    public static ExpressionMatcher expression(@Language("SQL") String expression)
+    public static SetExpressionMatcher setExpression(ApplyNode.SetExpression expression)
     {
-        return new ExpressionMatcher(expression);
+        return new SetExpressionMatcher(expression);
+    }
+
+    public static DataType dataType(String sqlType)
+    {
+        SqlParser parser = new SqlParser();
+        return parser.createType(sqlType);
     }
 
     public static ExpressionMatcher expression(Expression expression)
     {
         return new ExpressionMatcher(expression);
-    }
-
-    public PlanMatchPattern withOutputs(String... aliases)
-    {
-        return withOutputs(ImmutableList.copyOf(aliases));
     }
 
     public PlanMatchPattern withOutputs(List<String> aliases)
@@ -1085,6 +1069,36 @@ public final class PlanMatchPattern
     public static ExpectedValueProvider<FunctionCall> functionCall(String name, List<String> args)
     {
         return new FunctionCallProvider(QualifiedName.of(name), toSymbolAliases(args));
+    }
+
+    public static ExpectedValueProvider<AggregationFunction> aggregationFunction(String name, List<String> args)
+    {
+        return new AggregationFunctionProvider(
+                name,
+                false,
+                toSymbolAliases(args),
+                ImmutableList.of(),
+                Optional.empty());
+    }
+
+    public static ExpectedValueProvider<AggregationFunction> aggregationFunction(String name, List<String> args, List<PlanMatchPattern.Ordering> orderBy)
+    {
+        return new AggregationFunctionProvider(
+                name,
+                false,
+                toSymbolAliases(args),
+                orderBy,
+                Optional.empty());
+    }
+
+    public static ExpectedValueProvider<AggregationFunction> aggregationFunction(String name, boolean distinct, List<PlanTestSymbol> args)
+    {
+        return new AggregationFunctionProvider(
+                name,
+                distinct,
+                args,
+                ImmutableList.of(),
+                Optional.empty());
     }
 
     public static ExpectedValueProvider<FunctionCall> functionCall(String name, List<String> args, List<Ordering> orderBy)
@@ -1231,15 +1245,6 @@ public final class PlanMatchPattern
         private final SymbolAlias build;
         private final boolean nullAllowed;
 
-        public DynamicFilterPattern(String probeExpression, ComparisonExpression.Operator operator, String buildAlias, boolean nullAllowed)
-        {
-            this(
-                    PlanBuilder.expression(probeExpression),
-                    operator,
-                    buildAlias,
-                    nullAllowed);
-        }
-
         public DynamicFilterPattern(Expression probe, ComparisonExpression.Operator operator, String buildAlias, boolean nullAllowed)
         {
             this.probe = requireNonNull(probe, "probe is null");
@@ -1248,9 +1253,9 @@ public final class PlanMatchPattern
             this.nullAllowed = nullAllowed;
         }
 
-        public DynamicFilterPattern(String probeAlias, ComparisonExpression.Operator operator, String buildAlias)
+        public DynamicFilterPattern(Expression probe, ComparisonExpression.Operator operator, String buildAlias)
         {
-            this(probeAlias, operator, buildAlias, false);
+            this(probe, operator, buildAlias, false);
         }
 
         Expression getExpression(SymbolAliases aliases)
