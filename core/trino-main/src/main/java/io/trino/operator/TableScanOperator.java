@@ -34,6 +34,7 @@ import jakarta.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -162,14 +163,14 @@ public class TableScanOperator
 
         this.split = split;
 
-        Object splitInfo = split.getInfo();
-        if (splitInfo != null) {
-            operatorContext.setInfoSupplier(Suppliers.ofInstance(new SplitOperatorInfo(split.getCatalogHandle(), splitInfo)));
+        Map<String, String> splitInfo = split.getInfo();
+        if (!splitInfo.isEmpty()) {
+            operatorContext.setInfoSupplier(Suppliers.ofInstance(new SplitOperatorInfo(split.catalogHandle(), splitInfo)));
         }
 
         blocked.set(null);
 
-        if (split.getConnectorSplit() instanceof EmptySplit) {
+        if (split.connectorSplit() instanceof EmptySplit) {
             source = new EmptyPageSource();
         }
     }

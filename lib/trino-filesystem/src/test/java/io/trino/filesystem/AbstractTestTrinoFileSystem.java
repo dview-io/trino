@@ -510,7 +510,7 @@ public abstract class AbstractTestTrinoFileSystem
 
             if (isCreateExclusive()) {
                 // re-create without overwrite is an error
-                assertThatThrownBy(outputFile::create)
+                assertThatThrownBy(() -> outputFile.create().close())
                         .isInstanceOf(FileAlreadyExistsException.class)
                         .hasMessageContaining(tempBlob.location().toString());
 
@@ -1310,7 +1310,7 @@ public abstract class AbstractTestTrinoFileSystem
         }
     }
 
-    private Location createBlob(Closer closer, String path)
+    protected Location createBlob(Closer closer, String path)
     {
         Location location = createLocation(path);
         closer.register(new TempBlob(location)).createOrOverwrite(TEST_BLOB_CONTENT_PREFIX + location.toString());

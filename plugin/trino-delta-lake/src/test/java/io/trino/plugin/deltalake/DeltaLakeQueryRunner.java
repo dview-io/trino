@@ -74,7 +74,7 @@ public final class DeltaLakeQueryRunner
     public static class Builder
             extends DistributedQueryRunner.Builder<Builder>
     {
-        private String catalogName;
+        private String catalogName = DELTA_CATALOG;
         private ImmutableMap.Builder<String, String> deltaProperties = ImmutableMap.builder();
 
         protected Builder()
@@ -186,28 +186,6 @@ public final class DeltaLakeQueryRunner
                 additionalSetup);
     }
 
-    public static QueryRunner createAbfsDeltaLakeQueryRunner(
-            String catalogName,
-            String schemaName,
-            Map<String, String> extraProperties,
-            Map<String, String> connectorProperties,
-            HiveHadoop testingHadoop)
-            throws Exception
-    {
-        return createDockerizedDeltaLakeQueryRunner(
-                catalogName,
-                schemaName,
-                ImmutableMap.of(),
-                extraProperties,
-                ImmutableMap.<String, String>builder()
-                        .put("hive.azure.abfs-storage-account", requiredNonEmptySystemProperty("testing.azure-abfs-account"))
-                        .put("hive.azure.abfs-access-key", requiredNonEmptySystemProperty("testing.azure-abfs-access-key"))
-                        .putAll(connectorProperties)
-                        .buildOrThrow(),
-                testingHadoop,
-                queryRunner -> {});
-    }
-
     public static QueryRunner createDockerizedDeltaLakeQueryRunner(
             String catalogName,
             String schemaName,
@@ -265,10 +243,9 @@ public final class DeltaLakeQueryRunner
                             "hive.metastore", "file",
                             "hive.metastore.catalog.dir", metastoreDirectory.toUri().toString()));
 
-            copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(), TpchTable.getTables());
+            copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, TpchTable.getTables());
             log.info("Data directory is: %s", metastoreDirectory);
 
-            Thread.sleep(10);
             Logger log = Logger.get(DeltaLakeQueryRunner.class);
             log.info("======== SERVER STARTED ========");
             log.info("\n====\n%s\n====", queryRunner.getCoordinator().getBaseUrl());
@@ -282,7 +259,6 @@ public final class DeltaLakeQueryRunner
         {
             // Please set Delta Lake connector properties via VM options. e.g. -Dhive.metastore=glue -D..
             QueryRunner queryRunner = builder()
-                    .setCatalogName(DELTA_CATALOG)
                     .setExtraProperties(ImmutableMap.of("http-server.http.port", "8080"))
                     .build();
 
@@ -312,9 +288,8 @@ public final class DeltaLakeQueryRunner
                     runner -> {});
 
             queryRunner.execute("CREATE SCHEMA tpch WITH (location='s3://" + bucketName + "/tpch')");
-            copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(), TpchTable.getTables());
+            copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, TpchTable.getTables());
 
-            Thread.sleep(10);
             Logger log = Logger.get(DeltaLakeQueryRunner.class);
             log.info("======== SERVER STARTED ========");
             log.info("\n====\n%s\n====", queryRunner.getCoordinator().getBaseUrl());

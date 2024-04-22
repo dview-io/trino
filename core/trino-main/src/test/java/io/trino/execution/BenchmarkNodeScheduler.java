@@ -15,6 +15,7 @@ package io.trino.execution;
 
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Multimap;
@@ -58,12 +59,10 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -74,6 +73,7 @@ import static io.trino.SystemSessionProperties.MAX_UNACKNOWLEDGED_SPLITS_PER_TAS
 import static io.trino.testing.TestingHandles.TEST_CATALOG_HANDLE;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.Executors.newScheduledThreadPool;
+import static java.util.stream.Collectors.joining;
 
 @SuppressWarnings("MethodMayBeStatic")
 @State(Scope.Thread)
@@ -99,7 +99,7 @@ public class BenchmarkNodeScheduler
         List<RemoteTask> remoteTasks = ImmutableList.copyOf(data.getTaskMap().values());
         Iterator<MockRemoteTaskFactory.MockRemoteTask> finishingTask = Iterators.cycle(data.getTaskMap().values());
         Iterator<Split> splits = data.getSplits().iterator();
-        Set<Split> batch = new HashSet<>();
+        List<Split> batch = new ArrayList<>();
         while (splits.hasNext() || !batch.isEmpty()) {
             Multimap<InternalNode, Split> assignments = data.getNodeSelector().computeAssignments(batch, remoteTasks).getAssignments();
             for (InternalNode node : assignments.keySet()) {
@@ -264,9 +264,9 @@ public class BenchmarkNodeScheduler
         }
 
         @Override
-        public Object getInfo()
+        public Map<String, String> getSplitInfo()
         {
-            return this;
+            return ImmutableMap.of("addresses", hosts.stream().map(HostAddress::toString).collect(joining(",")));
         }
 
         @Override

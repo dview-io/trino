@@ -20,37 +20,28 @@ import io.trino.metadata.TestingFunctionResolution;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.LazyBlock;
+import io.trino.spi.function.OperatorType;
 import io.trino.spi.type.ArrayType;
 import io.trino.spi.type.Type;
 import io.trino.sql.PlannerContext;
-import io.trino.sql.planner.IrTypeAnalyzer;
+import io.trino.sql.ir.Between;
+import io.trino.sql.ir.Call;
+import io.trino.sql.ir.Case;
+import io.trino.sql.ir.Cast;
+import io.trino.sql.ir.Coalesce;
+import io.trino.sql.ir.Comparison;
+import io.trino.sql.ir.Constant;
+import io.trino.sql.ir.Expression;
+import io.trino.sql.ir.In;
+import io.trino.sql.ir.Lambda;
+import io.trino.sql.ir.Logical;
+import io.trino.sql.ir.NullIf;
+import io.trino.sql.ir.Reference;
+import io.trino.sql.ir.Switch;
+import io.trino.sql.ir.WhenClause;
 import io.trino.sql.planner.Symbol;
-import io.trino.sql.planner.TypeProvider;
 import io.trino.sql.relational.RowExpression;
 import io.trino.sql.relational.SqlToRowExpressionTranslator;
-import io.trino.sql.tree.ArithmeticBinaryExpression;
-import io.trino.sql.tree.ArithmeticUnaryExpression;
-import io.trino.sql.tree.BetweenPredicate;
-import io.trino.sql.tree.Cast;
-import io.trino.sql.tree.CoalesceExpression;
-import io.trino.sql.tree.ComparisonExpression;
-import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.FunctionCall;
-import io.trino.sql.tree.GenericLiteral;
-import io.trino.sql.tree.Identifier;
-import io.trino.sql.tree.IfExpression;
-import io.trino.sql.tree.InListExpression;
-import io.trino.sql.tree.InPredicate;
-import io.trino.sql.tree.LambdaArgumentDeclaration;
-import io.trino.sql.tree.LambdaExpression;
-import io.trino.sql.tree.LogicalExpression;
-import io.trino.sql.tree.LongLiteral;
-import io.trino.sql.tree.NullIfExpression;
-import io.trino.sql.tree.NullLiteral;
-import io.trino.sql.tree.SearchedCaseExpression;
-import io.trino.sql.tree.SimpleCaseExpression;
-import io.trino.sql.tree.SymbolReference;
-import io.trino.sql.tree.WhenClause;
 import io.trino.transaction.TestingTransactionManager;
 import io.trino.type.FunctionType;
 import org.junit.jupiter.api.Test;
@@ -59,30 +50,21 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static io.trino.SessionTestUtils.TEST_SESSION;
 import static io.trino.block.BlockAssertions.createLongSequenceBlock;
 import static io.trino.operator.project.PageFieldsToInputParametersRewriter.Result;
 import static io.trino.operator.project.PageFieldsToInputParametersRewriter.rewritePageFieldsToInputParameters;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static io.trino.sql.ir.Comparison.Operator.EQUAL;
+import static io.trino.sql.ir.Comparison.Operator.GREATER_THAN;
+import static io.trino.sql.ir.Logical.Operator.AND;
+import static io.trino.sql.ir.Logical.Operator.OR;
 import static io.trino.sql.planner.TestingPlannerContext.plannerContextBuilder;
-import static io.trino.sql.planner.assertions.PlanMatchPattern.dataType;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.ADD;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.DIVIDE;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.MODULUS;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.MULTIPLY;
-import static io.trino.sql.tree.ArithmeticUnaryExpression.Sign.MINUS;
-import static io.trino.sql.tree.ComparisonExpression.Operator.EQUAL;
-import static io.trino.sql.tree.ComparisonExpression.Operator.GREATER_THAN;
-import static io.trino.sql.tree.ComparisonExpression.Operator.GREATER_THAN_OR_EQUAL;
-import static io.trino.sql.tree.LogicalExpression.Operator.AND;
-import static io.trino.sql.tree.LogicalExpression.Operator.OR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestPageFieldsToInputParametersRewriter
@@ -91,13 +73,18 @@ public class TestPageFieldsToInputParametersRewriter
     private static final PlannerContext PLANNER_CONTEXT = plannerContextBuilder()
             .withTransactionManager(TRANSACTION_MANAGER)
             .build();
-    private static final IrTypeAnalyzer TYPE_ANALYZER = new IrTypeAnalyzer(PLANNER_CONTEXT);
 
     private static final TestingFunctionResolution FUNCTIONS = new TestingFunctionResolution();
     private static final ResolvedFunction CEIL = FUNCTIONS.resolveFunction("ceil", fromTypes(BIGINT));
     private static final ResolvedFunction ROUND = FUNCTIONS.resolveFunction("round", fromTypes(BIGINT));
     private static final ResolvedFunction TRANSFORM = FUNCTIONS.resolveFunction("transform", fromTypes(new ArrayType(BIGINT), new FunctionType(ImmutableList.of(BIGINT), INTEGER)));
-    private static final ResolvedFunction ZIP_WITH = FUNCTIONS.resolveFunction("zip_with", fromTypes(new ArrayType(BIGINT), new ArrayType(BIGINT), new FunctionType(ImmutableList.of(BIGINT, BIGINT), INTEGER)));
+    private static final ResolvedFunction ZIP_WITH = FUNCTIONS.resolveFunction("zip_with", fromTypes(new ArrayType(BIGINT), new ArrayType(BIGINT), new FunctionType(ImmutableList.of(BIGINT, BIGINT), BIGINT)));
+    private static final ResolvedFunction ADD_BIGINT = FUNCTIONS.resolveOperator(OperatorType.ADD, ImmutableList.of(BIGINT, BIGINT));
+    private static final ResolvedFunction MULTIPLY_BIGINT = FUNCTIONS.resolveOperator(OperatorType.MULTIPLY, ImmutableList.of(BIGINT, BIGINT));
+    private static final ResolvedFunction DIVIDE_BIGINT = FUNCTIONS.resolveOperator(OperatorType.DIVIDE, ImmutableList.of(BIGINT, BIGINT));
+    private static final ResolvedFunction MULTIPLY_INTEGER = FUNCTIONS.resolveOperator(OperatorType.MULTIPLY, ImmutableList.of(INTEGER, INTEGER));
+    private static final ResolvedFunction MODULUS_BIGINT = FUNCTIONS.resolveOperator(OperatorType.MODULUS, ImmutableList.of(BIGINT, BIGINT));
+    private static final ResolvedFunction NEGATION_BIGINT = FUNCTIONS.resolveOperator(OperatorType.NEGATION, ImmutableList.of(BIGINT));
 
     @Test
     public void testEagerLoading()
@@ -105,37 +92,34 @@ public class TestPageFieldsToInputParametersRewriter
         RowExpressionBuilder builder = RowExpressionBuilder.create()
                 .addSymbol("bigint0", BIGINT)
                 .addSymbol("bigint1", BIGINT);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new ArithmeticBinaryExpression(ADD, new SymbolReference("bigint0"), new LongLiteral("5"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new Cast(new ArithmeticBinaryExpression(MULTIPLY, new SymbolReference("bigint0"), new LongLiteral("10")), dataType("int"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new CoalesceExpression(new ArithmeticBinaryExpression(MODULUS, new SymbolReference("bigint0"), new LongLiteral("2")), new SymbolReference("bigint0"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new InPredicate(new SymbolReference("bigint0"), new InListExpression(ImmutableList.of(new GenericLiteral("bigint", "1"), new GenericLiteral("bigint", "2"), new GenericLiteral("bigint", "3"))))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new LongLiteral("0"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new ComparisonExpression(EQUAL, new ArithmeticBinaryExpression(ADD, new SymbolReference("bigint0"), new LongLiteral("1")), new LongLiteral("0"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new BetweenPredicate(new SymbolReference("bigint0"), new LongLiteral("1"), new LongLiteral("10"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new SearchedCaseExpression(ImmutableList.of(new WhenClause(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new LongLiteral("0")), new SymbolReference("bigint0"))), Optional.of(new Cast(new NullLiteral(), dataType("bigint"))))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new SimpleCaseExpression(new SymbolReference("bigint0"), ImmutableList.of(new WhenClause(new GenericLiteral("bigint", "1"), new GenericLiteral("bigint", "1"))), Optional.of(new ArithmeticUnaryExpression(MINUS, new SymbolReference("bigint0"))))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new IfExpression(new ComparisonExpression(GREATER_THAN_OR_EQUAL, new SymbolReference("bigint0"), new LongLiteral("150000")), new LongLiteral("0"), new LongLiteral("1"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new IfExpression(new ComparisonExpression(GREATER_THAN_OR_EQUAL, new SymbolReference("bigint0"), new GenericLiteral("bigint", "150000")), new SymbolReference("bigint0"), new GenericLiteral("bigint", "0"))), 1);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new ArithmeticBinaryExpression(ADD, new CoalesceExpression(new GenericLiteral("bigint", "0"), new SymbolReference("bigint0")), new SymbolReference("bigint0"))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(ADD_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 5L)))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Cast(new Call(MULTIPLY_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 10L))), INTEGER)), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Coalesce(new Call(MODULUS_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 2L))), new Reference(BIGINT, "bigint0"))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new In(new Reference(BIGINT, "bigint0"), ImmutableList.of(new Constant(BIGINT, 1L), new Constant(BIGINT, 2L), new Constant(BIGINT, 3L)))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Comparison(EQUAL, new Call(ADD_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 1L))), new Constant(BIGINT, 0L))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Between(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 1L), new Constant(BIGINT, 10L))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Case(ImmutableList.of(new WhenClause(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L)), new Reference(BIGINT, "bigint0"))), new Constant(BIGINT, null))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Switch(new Reference(BIGINT, "bigint0"), ImmutableList.of(new WhenClause(new Constant(BIGINT, 1L), new Constant(BIGINT, 1L))), new Call(NEGATION_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"))))), 1);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(ADD_BIGINT, ImmutableList.of(new Coalesce(new Constant(BIGINT, 0L), new Reference(BIGINT, "bigint0")), new Reference(BIGINT, "bigint0")))), 1);
 
-        verifyEagerlyLoadedColumns(builder.buildExpression(new ArithmeticBinaryExpression(ADD, new SymbolReference("bigint0"), new ArithmeticBinaryExpression(MULTIPLY, new GenericLiteral("BIGINT", "2"), new SymbolReference("bigint1")))), 2);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new NullIfExpression(new SymbolReference("bigint0"), new SymbolReference("bigint1"))), 2);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new CoalesceExpression(new FunctionCall(CEIL.toQualifiedName(), ImmutableList.of(new ArithmeticBinaryExpression(DIVIDE, new SymbolReference("bigint0"), new SymbolReference("bigint1")))), new GenericLiteral("BIGINT", "0"))), 2);
-        verifyEagerlyLoadedColumns(builder.buildExpression(new SearchedCaseExpression(ImmutableList.of(new WhenClause(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new SymbolReference("bigint1")), new LongLiteral("1"))), Optional.of(new LongLiteral("0")))), 2);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(ADD_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Call(MULTIPLY_BIGINT, ImmutableList.of(new Constant(BIGINT, 2L), new Reference(BIGINT, "bigint1")))))), 2);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new NullIf(new Reference(BIGINT, "bigint0"), new Reference(BIGINT, "bigint1"))), 2);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Coalesce(new Call(CEIL, ImmutableList.of(new Call(DIVIDE_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint0"), new Reference(BIGINT, "bigint1"))))), new Constant(BIGINT, 0L))), 2);
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Case(ImmutableList.of(new WhenClause(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Reference(BIGINT, "bigint1")), new Constant(INTEGER, 1L))), new Constant(INTEGER, 0L))), 2);
         verifyEagerlyLoadedColumns(
-                builder.buildExpression(new SearchedCaseExpression(ImmutableList.of(new WhenClause(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new GenericLiteral("BIGINT", "0")), new SymbolReference("bigint1"))), Optional.of(new GenericLiteral("BIGINT", "0")))), 2, ImmutableSet.of(0));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new CoalesceExpression(new FunctionCall(ROUND.toQualifiedName(), ImmutableList.of(new SymbolReference("bigint0"))), new SymbolReference("bigint1"))), 2, ImmutableSet.of(0));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new LogicalExpression(AND, ImmutableList.of(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new GenericLiteral("BIGINT", "0")), new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint1"), new GenericLiteral("BIGINT", "0"))))), 2, ImmutableSet.of(0));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new LogicalExpression(OR, ImmutableList.of(new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint0"), new GenericLiteral("BIGINT", "0")), new ComparisonExpression(GREATER_THAN, new SymbolReference("bigint1"), new GenericLiteral("BIGINT", "0"))))), 2, ImmutableSet.of(0));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new BetweenPredicate(new SymbolReference("bigint0"), new GenericLiteral("BIGINT", "0"), new SymbolReference("bigint1"))), 2, ImmutableSet.of(0));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new IfExpression(new ComparisonExpression(GREATER_THAN_OR_EQUAL, new SymbolReference("bigint1"), new GenericLiteral("BIGINT", "150000")), new GenericLiteral("BIGINT", "0"), new SymbolReference("bigint0"))), 2, ImmutableSet.of(0));
+                builder.buildExpression(new Case(ImmutableList.of(new WhenClause(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L)), new Reference(BIGINT, "bigint1"))), new Constant(BIGINT, 0L))), 2, ImmutableSet.of(0));
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Coalesce(new Call(ROUND, ImmutableList.of(new Reference(BIGINT, "bigint0"))), new Reference(BIGINT, "bigint1"))), 2, ImmutableSet.of(0));
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Logical(AND, ImmutableList.of(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L)), new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint1"), new Constant(BIGINT, 0L))))), 2, ImmutableSet.of(0));
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Logical(OR, ImmutableList.of(new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L)), new Comparison(GREATER_THAN, new Reference(BIGINT, "bigint1"), new Constant(BIGINT, 0L))))), 2, ImmutableSet.of(0));
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Between(new Reference(BIGINT, "bigint0"), new Constant(BIGINT, 0L), new Reference(BIGINT, "bigint1"))), 2, ImmutableSet.of(0));
 
         builder = RowExpressionBuilder.create()
                 .addSymbol("array_bigint0", new ArrayType(BIGINT))
                 .addSymbol("array_bigint1", new ArrayType(BIGINT));
-        verifyEagerlyLoadedColumns(builder.buildExpression(new FunctionCall(TRANSFORM.toQualifiedName(), ImmutableList.of(new SymbolReference("array_bigint0"), new LambdaExpression(ImmutableList.of(new LambdaArgumentDeclaration(new Identifier("x"))), new LongLiteral("1"))))), 1, ImmutableSet.of());
-        verifyEagerlyLoadedColumns(builder.buildExpression(new FunctionCall(TRANSFORM.toQualifiedName(), ImmutableList.of(new SymbolReference("array_bigint0"), new LambdaExpression(ImmutableList.of(new LambdaArgumentDeclaration(new Identifier("x"))), new ArithmeticBinaryExpression(MULTIPLY, new LongLiteral("2"), new SymbolReference("x")))))), 1, ImmutableSet.of());
-        verifyEagerlyLoadedColumns(builder.buildExpression(new FunctionCall(ZIP_WITH.toQualifiedName(), ImmutableList.of(new SymbolReference("array_bigint0"), new SymbolReference("array_bigint1"), new LambdaExpression(ImmutableList.of(new LambdaArgumentDeclaration(new Identifier("x")), new LambdaArgumentDeclaration(new Identifier("y"))), new ArithmeticBinaryExpression(MULTIPLY, new GenericLiteral("BIGINT", "2"), new SymbolReference("x")))))), 2, ImmutableSet.of());
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(TRANSFORM, ImmutableList.of(new Reference(new ArrayType(BIGINT), "array_bigint0"), new Lambda(ImmutableList.of(new Symbol(BIGINT, "x")), new Constant(INTEGER, 1L))))), 1, ImmutableSet.of());
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(TRANSFORM, ImmutableList.of(new Reference(new ArrayType(BIGINT), "array_bigint0"), new Lambda(ImmutableList.of(new Symbol(BIGINT, "x")), new Call(MULTIPLY_INTEGER, ImmutableList.of(new Constant(INTEGER, 2L), new Reference(INTEGER, "x"))))))), 1, ImmutableSet.of());
+        verifyEagerlyLoadedColumns(builder.buildExpression(new Call(ZIP_WITH, ImmutableList.of(new Reference(new ArrayType(BIGINT), "array_bigint0"), new Reference(new ArrayType(BIGINT), "array_bigint1"), new Lambda(ImmutableList.of(new Symbol(BIGINT, "x"), new Symbol(BIGINT, "y")), new Call(MULTIPLY_BIGINT, ImmutableList.of(new Constant(BIGINT, 2L), new Reference(BIGINT, "x"))))))), 2, ImmutableSet.of());
     }
 
     private static void verifyEagerlyLoadedColumns(RowExpression rowExpression, int columnCount)
@@ -163,7 +147,6 @@ public class TestPageFieldsToInputParametersRewriter
 
     private static class RowExpressionBuilder
     {
-        private final Map<Symbol, Type> symbolTypes = new HashMap<>();
         private final Map<Symbol, Integer> sourceLayout = new HashMap<>();
         private final List<Type> types = new LinkedList<>();
 
@@ -174,8 +157,7 @@ public class TestPageFieldsToInputParametersRewriter
 
         private RowExpressionBuilder addSymbol(String name, Type type)
         {
-            Symbol symbol = new Symbol(name);
-            symbolTypes.put(symbol, type);
+            Symbol symbol = new Symbol(type, name);
             sourceLayout.put(symbol, types.size());
             types.add(type);
             return this;
@@ -185,13 +167,9 @@ public class TestPageFieldsToInputParametersRewriter
         {
             return SqlToRowExpressionTranslator.translate(
                     expression,
-                    TYPE_ANALYZER.getTypes(TEST_SESSION, TypeProvider.copyOf(symbolTypes), expression),
                     sourceLayout,
                     PLANNER_CONTEXT.getMetadata(),
-                    PLANNER_CONTEXT.getFunctionManager(),
-                    PLANNER_CONTEXT.getTypeManager(),
-                    TEST_SESSION,
-                    true);
+                    PLANNER_CONTEXT.getTypeManager());
         }
     }
 }

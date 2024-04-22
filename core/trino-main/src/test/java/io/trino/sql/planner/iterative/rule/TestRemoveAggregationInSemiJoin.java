@@ -14,11 +14,11 @@
 package io.trino.sql.planner.iterative.rule;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.sql.ir.Reference;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.iterative.rule.test.BaseRuleTest;
 import io.trino.sql.planner.iterative.rule.test.PlanBuilder;
 import io.trino.sql.planner.plan.PlanNode;
-import io.trino.sql.tree.SymbolReference;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -79,7 +79,7 @@ public class TestRemoveAggregationInSemiJoin
                 p.values(leftKey),
                 p.aggregation(builder -> builder
                         .globalGrouping()
-                        .addAggregation(rightKey, aggregation("count", ImmutableList.of(new SymbolReference("rightValue"))), ImmutableList.of(BIGINT))
+                        .addAggregation(rightKey, aggregation("count", ImmutableList.of(new Reference(BIGINT, "rightValue"))), ImmutableList.of(BIGINT))
                         .source(p.values(p.symbol("rightValue")))));
     }
 }

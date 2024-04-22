@@ -26,11 +26,15 @@ import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SortOrder;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
-import io.trino.sql.parser.SqlParser;
+import io.trino.sql.ir.Comparison;
+import io.trino.sql.ir.Expression;
+import io.trino.sql.ir.Not;
+import io.trino.sql.ir.Row;
 import io.trino.sql.planner.PartitioningHandle;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.iterative.GroupReference;
 import io.trino.sql.planner.optimizations.SymbolMapper;
+import io.trino.sql.planner.plan.AdaptivePlanNode;
 import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.AggregationNode.Step;
 import io.trino.sql.planner.plan.ApplyNode;
@@ -42,7 +46,6 @@ import io.trino.sql.planner.plan.EnforceSingleRowNode;
 import io.trino.sql.planner.plan.ExceptNode;
 import io.trino.sql.planner.plan.ExchangeNode;
 import io.trino.sql.planner.plan.FilterNode;
-import io.trino.sql.planner.plan.FrameBoundType;
 import io.trino.sql.planner.plan.GroupIdNode;
 import io.trino.sql.planner.plan.IndexJoinNode;
 import io.trino.sql.planner.plan.IndexSourceNode;
@@ -54,8 +57,10 @@ import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.MergeWriterNode;
 import io.trino.sql.planner.plan.OffsetNode;
 import io.trino.sql.planner.plan.OutputNode;
+import io.trino.sql.planner.plan.PlanFragmentId;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.ProjectNode;
+import io.trino.sql.planner.plan.RemoteSourceNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
 import io.trino.sql.planner.plan.SortNode;
 import io.trino.sql.planner.plan.SpatialJoinNode;
@@ -66,17 +71,8 @@ import io.trino.sql.planner.plan.TopNNode;
 import io.trino.sql.planner.plan.UnionNode;
 import io.trino.sql.planner.plan.UnnestNode;
 import io.trino.sql.planner.plan.ValuesNode;
-import io.trino.sql.planner.plan.WindowFrameType;
 import io.trino.sql.planner.plan.WindowNode;
-import io.trino.sql.tree.ComparisonExpression;
-import io.trino.sql.tree.DataType;
-import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.FunctionCall;
-import io.trino.sql.tree.NotExpression;
-import io.trino.sql.tree.QualifiedName;
-import io.trino.sql.tree.Row;
 import io.trino.sql.tree.SortItem;
-import io.trino.sql.tree.WindowFrame;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -96,12 +92,12 @@ import static io.trino.spi.connector.SortOrder.ASC_NULLS_FIRST;
 import static io.trino.spi.connector.SortOrder.ASC_NULLS_LAST;
 import static io.trino.spi.connector.SortOrder.DESC_NULLS_FIRST;
 import static io.trino.spi.connector.SortOrder.DESC_NULLS_LAST;
+import static io.trino.sql.ir.Comparison.Operator.IS_DISTINCT_FROM;
 import static io.trino.sql.planner.assertions.MatchResult.NO_MATCH;
 import static io.trino.sql.planner.assertions.MatchResult.match;
 import static io.trino.sql.planner.assertions.StrictAssignedSymbolsMatcher.actualAssignments;
 import static io.trino.sql.planner.assertions.StrictSymbolsMatcher.actualOutputs;
 import static io.trino.sql.planner.plan.JoinType.INNER;
-import static io.trino.sql.tree.ComparisonExpression.Operator.IS_DISTINCT_FROM;
 import static io.trino.sql.tree.SortItem.NullOrdering.FIRST;
 import static io.trino.sql.tree.SortItem.NullOrdering.UNDEFINED;
 import static io.trino.sql.tree.SortItem.Ordering.ASCENDING;
@@ -141,6 +137,21 @@ public final class PlanMatchPattern
     public static PlanMatchPattern anyNot(Class<? extends PlanNode> excludeNodeClass, PlanMatchPattern... sources)
     {
         return any(sources).with(new NotPlanNodeMatcher(excludeNodeClass));
+    }
+
+    public static PlanMatchPattern adaptivePlan(PlanMatchPattern initialPlan, PlanMatchPattern currentPlan)
+    {
+        return node(AdaptivePlanNode.class, currentPlan).with(new AdaptivePlanMatcher(initialPlan));
+    }
+
+    public static PlanMatchPattern remoteSource(List<PlanFragmentId> sourceFragmentIds)
+    {
+        return node(RemoteSourceNode.class)
+                .with(new RemoteSourceMatcher(
+                        sourceFragmentIds,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty()));
     }
 
     public static PlanMatchPattern tableScan(String expectedTableName)
@@ -356,36 +367,6 @@ public final class PlanMatchPattern
                 new SymbolAlias(markerSymbol),
                 toSymbolAliases(distinctSymbols),
                 Optional.of(new SymbolAlias(hashSymbol))));
-    }
-
-    public static ExpectedValueProvider<WindowNode.Frame> windowFrame(
-            WindowFrameType type,
-            FrameBoundType startType,
-            Optional<String> startValue,
-            FrameBoundType endType,
-            Optional<String> endValue,
-            Optional<String> sortKey)
-    {
-        return windowFrame(type, startType, startValue, sortKey, endType, endValue, sortKey);
-    }
-
-    public static ExpectedValueProvider<WindowNode.Frame> windowFrame(
-            WindowFrameType type,
-            FrameBoundType startType,
-            Optional<String> startValue,
-            Optional<String> sortKeyForStartComparison,
-            FrameBoundType endType,
-            Optional<String> endValue,
-            Optional<String> sortKeyForEndComparison)
-    {
-        return new WindowFrameProvider(
-                type,
-                startType,
-                startValue.map(SymbolAlias::new),
-                sortKeyForStartComparison.map(SymbolAlias::new),
-                endType,
-                endValue.map(SymbolAlias::new),
-                sortKeyForEndComparison.map(SymbolAlias::new));
     }
 
     public static PlanMatchPattern window(Consumer<WindowMatcher.Builder> handler, PlanMatchPattern source)
@@ -1033,12 +1014,6 @@ public final class PlanMatchPattern
         return new SetExpressionMatcher(expression);
     }
 
-    public static DataType dataType(String sqlType)
-    {
-        SqlParser parser = new SqlParser();
-        return parser.createType(sqlType);
-    }
-
     public static ExpressionMatcher expression(Expression expression)
     {
         return new ExpressionMatcher(expression);
@@ -1059,16 +1034,6 @@ public final class PlanMatchPattern
     public boolean isTerminated()
     {
         return sourcePatterns.isEmpty();
-    }
-
-    public static PlanTestSymbol anySymbol()
-    {
-        return new AnySymbol();
-    }
-
-    public static ExpectedValueProvider<FunctionCall> functionCall(String name, List<String> args)
-    {
-        return new FunctionCallProvider(QualifiedName.of(name), toSymbolAliases(args));
     }
 
     public static ExpectedValueProvider<AggregationFunction> aggregationFunction(String name, List<String> args)
@@ -1101,30 +1066,9 @@ public final class PlanMatchPattern
                 Optional.empty());
     }
 
-    public static ExpectedValueProvider<FunctionCall> functionCall(String name, List<String> args, List<Ordering> orderBy)
+    public static ExpectedValueProvider<WindowFunction> windowFunction(String name, List<String> args, WindowNode.Frame frame)
     {
-        return new FunctionCallProvider(QualifiedName.of(name), toSymbolAliases(args), orderBy);
-    }
-
-    public static ExpectedValueProvider<FunctionCall> functionCall(
-            String name,
-            Optional<WindowFrame> frame,
-            List<String> args)
-    {
-        return new FunctionCallProvider(QualifiedName.of(name), frame, false, toSymbolAliases(args));
-    }
-
-    public static ExpectedValueProvider<FunctionCall> functionCall(
-            String name,
-            boolean distinct,
-            List<PlanTestSymbol> args)
-    {
-        return new FunctionCallProvider(QualifiedName.of(name), distinct, args);
-    }
-
-    public static ExpectedValueProvider<FunctionCall> functionCall(String name, List<String> args, String filter)
-    {
-        return new FunctionCallProvider(QualifiedName.of(name), toSymbolAliases(args), symbol(filter));
+        return new WindowFunctionProvider(name, frame, toSymbolAliases(args));
     }
 
     public static List<Expression> toSymbolReferences(List<PlanTestSymbol> aliases, SymbolAliases symbolAliases)
@@ -1202,7 +1146,10 @@ public final class PlanMatchPattern
                 .collect(toImmutableList());
 
         for (Matcher matcher : matchersToPrint) {
-            builder.append(indentString(indent + 1)).append(matcher.toString()).append("\n");
+            builder
+                    .append(indentString(indent + 1))
+                    .append(matcher.toString().replace("\n", "\n" + indentString(indent + 1)))
+                    .append("\n");
         }
 
         for (PlanMatchPattern pattern : sourcePatterns) {
@@ -1228,7 +1175,7 @@ public final class PlanMatchPattern
     public static GroupingSetDescriptor singleGroupingSet(List<String> groupingKeys)
     {
         Set<Integer> globalGroupingSets;
-        if (groupingKeys.size() == 0) {
+        if (groupingKeys.isEmpty()) {
             globalGroupingSets = ImmutableSet.of(0);
         }
         else {
@@ -1241,11 +1188,11 @@ public final class PlanMatchPattern
     public static class DynamicFilterPattern
     {
         private final Expression probe;
-        private final ComparisonExpression.Operator operator;
+        private final Comparison.Operator operator;
         private final SymbolAlias build;
         private final boolean nullAllowed;
 
-        public DynamicFilterPattern(Expression probe, ComparisonExpression.Operator operator, String buildAlias, boolean nullAllowed)
+        public DynamicFilterPattern(Expression probe, Comparison.Operator operator, String buildAlias, boolean nullAllowed)
         {
             this.probe = requireNonNull(probe, "probe is null");
             this.operator = requireNonNull(operator, "operator is null");
@@ -1253,7 +1200,7 @@ public final class PlanMatchPattern
             this.nullAllowed = nullAllowed;
         }
 
-        public DynamicFilterPattern(Expression probe, ComparisonExpression.Operator operator, String buildAlias)
+        public DynamicFilterPattern(Expression probe, Comparison.Operator operator, String buildAlias)
         {
             this(probe, operator, buildAlias, false);
         }
@@ -1262,13 +1209,13 @@ public final class PlanMatchPattern
         {
             Expression probeMapped = symbolMapper(aliases).map(probe);
             if (nullAllowed) {
-                return new NotExpression(
-                        new ComparisonExpression(
+                return new Not(
+                        new Comparison(
                                 IS_DISTINCT_FROM,
                                 probeMapped,
                                 build.toSymbol(aliases).toSymbolReference()));
             }
-            return new ComparisonExpression(
+            return new Comparison(
                     operator,
                     probeMapped,
                     build.toSymbol(aliases).toSymbolReference());
@@ -1276,7 +1223,7 @@ public final class PlanMatchPattern
 
         private static SymbolMapper symbolMapper(SymbolAliases symbolAliases)
         {
-            return new SymbolMapper(symbol -> Symbol.from(symbolAliases.get(symbol.getName())));
+            return new SymbolMapper(symbol -> Symbol.from(symbolAliases.get(symbol.name())));
         }
 
         @Override
@@ -1372,16 +1319,6 @@ public final class PlanMatchPattern
         public String getField()
         {
             return field;
-        }
-
-        public SortItem.Ordering getOrdering()
-        {
-            return ordering;
-        }
-
-        public SortItem.NullOrdering getNullOrdering()
-        {
-            return nullOrdering;
         }
 
         public SortOrder getSortOrder()

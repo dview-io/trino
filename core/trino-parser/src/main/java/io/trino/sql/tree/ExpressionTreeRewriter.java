@@ -654,11 +654,7 @@ public final class ExpressionTreeRewriter<C>
 
             List<LambdaArgumentDeclaration> arguments = node.getArguments().stream()
                     .map(LambdaArgumentDeclaration::getName)
-                    .map(Identifier::getValue)
-                    .map(SymbolReference::new)
                     .map(expression -> rewrite(expression, context.get()))
-                    .map(SymbolReference::getName)
-                    .map(Identifier::new)
                     .map(LambdaArgumentDeclaration::new)
                     .collect(toImmutableList());
 
@@ -667,27 +663,6 @@ public final class ExpressionTreeRewriter<C>
                 return new LambdaExpression(arguments, body);
             }
 
-            return node;
-        }
-
-        @Override
-        protected Expression visitBindExpression(BindExpression node, Context<C> context)
-        {
-            if (!context.isDefaultRewrite()) {
-                Expression result = rewriter.rewriteBindExpression(node, context.get(), ExpressionTreeRewriter.this);
-                if (result != null) {
-                    return result;
-                }
-            }
-
-            List<Expression> values = node.getValues().stream()
-                    .map(value -> rewrite(value, context.get()))
-                    .collect(toImmutableList());
-            Expression function = rewrite(node.getFunction(), context.get());
-
-            if (!sameElements(values, node.getValues()) || (function != node.getFunction())) {
-                return new BindExpression(values, function);
-            }
             return node;
         }
 
@@ -1064,19 +1039,6 @@ public final class ExpressionTreeRewriter<C>
         {
             if (!context.isDefaultRewrite()) {
                 Expression result = rewriter.rewriteFieldReference(node, context.get(), ExpressionTreeRewriter.this);
-                if (result != null) {
-                    return result;
-                }
-            }
-
-            return node;
-        }
-
-        @Override
-        protected Expression visitSymbolReference(SymbolReference node, Context<C> context)
-        {
-            if (!context.isDefaultRewrite()) {
-                Expression result = rewriter.rewriteSymbolReference(node, context.get(), ExpressionTreeRewriter.this);
                 if (result != null) {
                     return result;
                 }

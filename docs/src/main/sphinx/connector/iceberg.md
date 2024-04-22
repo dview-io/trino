@@ -157,10 +157,6 @@ implementation is used:
     materialized view definition. When the `storage_schema` materialized view
     property is specified, it takes precedence over this catalog property.
   - Empty
-* - `iceberg.materialized-views.hide-storage-table`
-  - Hide the information about the storage table backing the materialized view
-    in the metastore.
-  - `true`
 * - `iceberg.register-table-procedure.enabled`
   - Enable to allow user to call `register_table` procedure.
   - `false`
@@ -306,7 +302,7 @@ No other types are supported.
 
 The Iceberg connector supports Kerberos authentication for the Hive metastore
 and HDFS and is configured using the same parameters as the Hive connector. Find
-more information in the [](/connector/hive-security) section.
+more information in the [](/object-storage/file-system-hdfs) section.
 
 (iceberg-authorization)=
 ### Authorization
@@ -579,15 +575,15 @@ The {ref}`sql-schema-table-management` functionality includes support for:
 #### Schema evolution
 
 Iceberg supports schema evolution, with safe column add, drop, reorder, and
-rename operations, including in nested structures. 
+rename operations, including in nested structures.
 
 Iceberg supports updating column types only for widening operations:
- 
+
 - `INTEGER` to `BIGINT`
 - `REAL` to `DOUBLE`
 - `DECIMAL(p,s)` to `DECIMAL(p2,s)` when `p2` > `p` (scale cannot change)
 
-Partitioning can also be changed and the connector can still query data 
+Partitioning can also be changed and the connector can still query data
 created before the partitioning change.
 
 (iceberg-alter-table-execute)=
@@ -705,6 +701,12 @@ connector using a {doc}`WITH </sql/create-table-as>` clause.
   - Optionally specifies table partitioning. If a table is partitioned by
     columns `c1` and `c2`, the partitioning property is `partitioning =
     ARRAY['c1', 'c2']`.
+* - `sorted_by`
+  - The sort order to be applied during writes to the content of
+    each file written to the table. If the table files are sorted by columns
+    `c1` and `c2`, the sort order property is `sorted_by = ARRAY['c1', 'c2']`.
+    The sort order applies to the contents written within each output file
+    independently and not the entire dataset.
 * - `location`
   - Optionally specifies the file system location URI for the table.
 * - `format_version`
@@ -824,6 +826,52 @@ The output of the query has the following columns:
   - `BOOLEAN`
   - Whether or not this snapshot is an ancestor of the current snapshot.
 :::
+
+##### `$metadata_log_entries` table
+
+The `$metadata_log_entries` table provides a view of metadata log entries
+of the Iceberg table.
+
+You can retrieve the information about the metadata log entries of the Iceberg
+table `test_table` by using the following query:
+
+```
+SELECT * FROM "test_table$metadata_log_entries"
+```
+
+```text
+             timestamp                 |                                                              file                                                          | latest_snapshot_id  | latest_schema_id | latest_sequence_number
+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------+---------------------+------------------+------------------------
+ 2024-01-16 15:55:31.172 Europe/Vienna | hdfs://hadoop-master:9000/user/hive/warehouse/test_table/metadata/00000-39174715-be2a-48fa-9949-35413b8b736e.metadata.json | 1221802298419195590 |                0 |                      1
+ 2024-01-16 17:19:56.118 Europe/Vienna | hdfs://hadoop-master:9000/user/hive/warehouse/test_table/metadata/00001-e40178c9-271f-4a96-ad29-eed5e7aef9b0.metadata.json | 7124386610209126943 |                0 |                      2
+```
+
+The output of the query has the following columns:
+
+:::{list-table} Metadata log entries columns
+:widths: 30, 30, 40
+:header-rows: 1
+
+* - Name
+  - Type
+  - Description
+* - `timestamp`
+  - `TIMESTAMP(3) WITH TIME ZONE`
+  - The time when the metadata was created.
+* - `file`
+  - `VARCHAR`
+  - The location of the metadata file.
+* - `latest_snapshot_id`
+  - `BIGINT`
+  - The identifier of the latest snapshot when the metadata was updated.
+* - `latest_schema_id`
+  - `INTEGER`
+  - The identifier of the latest schema when the metadata was updated.
+* - `latest_sequence_number`
+  - `BIGINT`
+  - The data sequence number of the metadata file.
+:::
+
 
 ##### `$snapshots` table
 
@@ -1307,7 +1355,7 @@ replacement creates a new snapshot with the new table definition (see
 {doc}`/sql/create-table` and {doc}`/sql/create-table-as`), but keeps table history.
 
 The new table after replacement is completely new and separate from the old table.
-Only the name of the table remains identical. Earlier snapshots can be retrieved 
+Only the name of the table remains identical. Earlier snapshots can be retrieved
 through Iceberg's [time travel](iceberg-time-travel).
 
 For example a partitioned table `my_table` can be replaced by completely new
@@ -1356,7 +1404,7 @@ FROM example.testdb.customer_orders FOR TIMESTAMP AS OF TIMESTAMP '2022-03-23 09
 The connector allows to create a new snapshot through Iceberg's [replace table](iceberg-create-or-replace).
 
 ```
-CREATE OR REPLACE TABLE example.testdb.customer_orders AS 
+CREATE OR REPLACE TABLE example.testdb.customer_orders AS
 SELECT *
 FROM example.testdb.customer_orders FOR TIMESTAMP AS OF TIMESTAMP '2022-03-23 09:59:29.803 Europe/Vienna'
 ```

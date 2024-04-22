@@ -223,6 +223,13 @@ public class TestCassandraConnectorTest
     }
 
     @Test
+    @Override
+    public void testSelectInformationSchemaColumns()
+    {
+        executeExclusively(super::testSelectInformationSchemaColumns);
+    }
+
+    @Test
     public void testPushdownUuidPartitionKeyPredicate()
     {
         try (TestCassandraTable testCassandraTable = testTable(
@@ -450,9 +457,9 @@ public class TestCassandraConnectorTest
                 columnsValue(9, ImmutableList.of(
                         rowNumber -> format("'key %d'", rowNumber),
                         rowNumber -> format("00000000-0000-0000-0000-%012d", rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
+                        String::valueOf,
+                        String::valueOf,
+                        String::valueOf,
                         rowNumber -> String.valueOf(rowNumber + 1000),
                         rowNumber -> toHexString(ByteBuffer.wrap(Ints.toByteArray(rowNumber)).asReadOnlyBuffer()),
                         rowNumber -> format("'%s'", DateTimeFormatter.ofPattern("uuuu-MM-dd").format(TIMESTAMP_VALUE)),
@@ -499,9 +506,9 @@ public class TestCassandraConnectorTest
                 columnsValue(9, ImmutableList.of(
                         rowNumber -> format("'key %d'", rowNumber),
                         rowNumber -> format("00000000-0000-0000-0000-%012d", rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
+                        String::valueOf,
+                        String::valueOf,
+                        String::valueOf,
                         rowNumber -> String.valueOf(rowNumber + 1000),
                         rowNumber -> toHexString(ByteBuffer.wrap(Ints.toByteArray(rowNumber))),
                         rowNumber -> format("'%s'", DateTimeFormatter.ofPattern("uuuu-MM-dd").format(TIMESTAMP_VALUE)),
@@ -562,9 +569,9 @@ public class TestCassandraConnectorTest
                 columnsValue(9, ImmutableList.of(
                         rowNumber -> format("'key %d'", rowNumber),
                         rowNumber -> format("00000000-0000-0000-0000-%012d", rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
-                        rowNumber -> String.valueOf(rowNumber),
+                        String::valueOf,
+                        String::valueOf,
+                        String::valueOf,
                         rowNumber -> String.valueOf(rowNumber + 1000),
                         rowNumber -> toHexString(ByteBuffer.wrap(Ints.toByteArray(rowNumber))),
                         rowNumber -> format("'%s'", DateTimeFormatter.ofPattern("uuuu-MM-dd").format(TIMESTAMP_VALUE)),
@@ -1629,7 +1636,7 @@ public class TestCassandraConnectorTest
 
     private TestCassandraTable testTable(String namePrefix, List<TestCassandraTable.ColumnDefinition> columnDefinitions, List<String> rowsToInsert)
     {
-        return new TestCassandraTable(session::execute, server, KEYSPACE, namePrefix, columnDefinitions, rowsToInsert);
+        return new TestCassandraTable(getQueryRunner(), session::execute, KEYSPACE, namePrefix, columnDefinitions, rowsToInsert);
     }
 
     private void onCassandra(@Language("SQL") String sql)

@@ -13,11 +13,13 @@
  */
 package io.trino.sql.routine;
 
+import com.google.common.hash.Hashing;
 import io.airlift.slice.Slice;
 import io.trino.Session;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.operator.scalar.SpecializedSqlScalarFunction;
 import io.trino.security.AllowAllAccessControl;
+import io.trino.spi.block.TestingBlockEncodingSerde;
 import io.trino.spi.function.FunctionId;
 import io.trino.spi.function.FunctionMetadata;
 import io.trino.spi.function.InvocationConvention;
@@ -46,7 +48,9 @@ import static io.trino.spi.function.InvocationConvention.InvocationReturnConvent
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DoubleType.DOUBLE;
+import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.VarcharType.VARCHAR;
+import static io.trino.spi.type.VarcharType.createVarcharType;
 import static io.trino.sql.planner.TestingPlannerContext.plannerContextBuilder;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static io.trino.testing.TransactionBuilder.transaction;
@@ -409,8 +413,8 @@ class TestSqlFunctions
     @Test
     void testArray()
     {
-        testSingleExpression(BIGINT, 3L, BIGINT, 5L, "array[3,4,5,6,7][p]");
-        testSingleExpression(BIGINT, 0L, BIGINT, 0L, "array_sort(array[3,2,4,5,1,p])[1]");
+        testSingleExpression(INTEGER, 3L, INTEGER, 5L, "array[3,4,5,6,7][p]");
+        testSingleExpression(INTEGER, 0L, INTEGER, 0L, "array_sort(array[3,2,4,5,1,p])[1]");
     }
 
     @Test
@@ -422,7 +426,7 @@ class TestSqlFunctions
     @Test
     void testLambda()
     {
-        testSingleExpression(BIGINT, 3L, BIGINT, 9L, "(transform(ARRAY [5, 6], x -> x + p)[2])", false);
+        testSingleExpression(INTEGER, 3L, INTEGER, 9L, "(transform(ARRAY [5, 6], x -> x + p)[2])", false);
     }
 
     @Test
@@ -461,11 +465,11 @@ class TestSqlFunctions
     @Test
     void testSpecialType()
     {
-        testSingleExpression(VARCHAR, utf8Slice("abc"), BOOLEAN, true, "(p LIKE '%bc')");
-        testSingleExpression(VARCHAR, utf8Slice("xb"), BOOLEAN, false, "(p LIKE '%bc')");
-        testSingleExpression(VARCHAR, utf8Slice("abc"), BOOLEAN, false, "regexp_like(p, '\\d')");
-        testSingleExpression(VARCHAR, utf8Slice("123"), BOOLEAN, true, "regexp_like(p, '\\d')");
-        testSingleExpression(VARCHAR, utf8Slice("[4,5,6]"), VARCHAR, "6", "json_extract_scalar(p, '$[2]')");
+        testSingleExpression(createVarcharType(3), utf8Slice("abc"), BOOLEAN, true, "(p LIKE '%bc')");
+        testSingleExpression(createVarcharType(2), utf8Slice("xb"), BOOLEAN, false, "(p LIKE '%bc')");
+        testSingleExpression(createVarcharType(3), utf8Slice("abc"), BOOLEAN, false, "regexp_like(p, '\\d')");
+        testSingleExpression(createVarcharType(3), utf8Slice("123"), BOOLEAN, true, "regexp_like(p, '\\d')");
+        testSingleExpression(createVarcharType(7), utf8Slice("[4,5,6]"), VARCHAR, "6", "json_extract_scalar(p, '$[2]')");
     }
 
     private final AtomicLong nextId = new AtomicLong();
@@ -528,8 +532,11 @@ class TestSqlFunctions
         SqlRoutineAnalyzer analyzer = new SqlRoutineAnalyzer(PLANNER_CONTEXT, WarningCollector.NOOP);
         SqlRoutineAnalysis analysis = analyzer.analyze(session, new AllowAllAccessControl(), function);
 
-        SqlRoutinePlanner planner = new SqlRoutinePlanner(PLANNER_CONTEXT, WarningCollector.NOOP);
+        SqlRoutinePlanner planner = new SqlRoutinePlanner(PLANNER_CONTEXT);
         IrRoutine routine = planner.planSqlFunction(session, function, analysis);
+
+        // verify routine hash does not fail
+        SqlRoutineHash.hash(routine, Hashing.sha256().newHasher(), new TestingBlockEncodingSerde());
 
         SqlRoutineCompiler compiler = new SqlRoutineCompiler(createTestingFunctionManager());
         SpecializedSqlScalarFunction sqlScalarFunction = compiler.compile(routine);

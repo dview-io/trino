@@ -23,15 +23,14 @@ import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.sql.PlannerContext;
+import io.trino.sql.ir.Booleans;
+import io.trino.sql.ir.Expression;
 import io.trino.sql.planner.DomainTranslator;
 import io.trino.sql.planner.Symbol;
-import io.trino.sql.planner.TypeProvider;
 import io.trino.sql.planner.iterative.Rule;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.ValuesNode;
-import io.trino.sql.tree.BooleanLiteral;
-import io.trino.sql.tree.Expression;
 
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -70,9 +69,8 @@ public class PushdownFilterIntoRowNumber
     public Result apply(FilterNode node, Captures captures, Context context)
     {
         Session session = context.getSession();
-        TypeProvider types = context.getSymbolAllocator().getTypes();
 
-        DomainTranslator.ExtractionResult extractionResult = DomainTranslator.getExtractionResult(plannerContext, session, node.getPredicate(), types);
+        DomainTranslator.ExtractionResult extractionResult = DomainTranslator.getExtractionResult(plannerContext, session, node.getPredicate());
         TupleDomain<Symbol> tupleDomain = extractionResult.getTupleDomain();
 
         RowNumberNode source = captures.get(CHILD);
@@ -102,11 +100,10 @@ public class PushdownFilterIntoRowNumber
 
         TupleDomain<Symbol> newTupleDomain = tupleDomain.filter((symbol, domain) -> !symbol.equals(rowNumberSymbol));
         Expression newPredicate = combineConjuncts(
-                plannerContext.getMetadata(),
                 extractionResult.getRemainingExpression(),
-                new DomainTranslator(plannerContext).toPredicate(newTupleDomain));
+                DomainTranslator.toPredicate(newTupleDomain));
 
-        if (newPredicate.equals(BooleanLiteral.TRUE_LITERAL)) {
+        if (newPredicate.equals(Booleans.TRUE)) {
             return Result.ofPlanNode(source);
         }
 

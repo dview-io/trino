@@ -132,7 +132,7 @@ public class CassandraMetadata
     {
         requireNonNull(tableHandle, "tableHandle is null");
         CassandraTableHandle handle = (CassandraTableHandle) tableHandle;
-        if (handle.getRelationHandle() instanceof CassandraQueryRelationHandle queryRelationHandle) {
+        if (handle.relationHandle() instanceof CassandraQueryRelationHandle queryRelationHandle) {
             List<ColumnMetadata> columns = getColumnHandles(queryRelationHandle.getQuery()).stream()
                     .map(CassandraColumnHandle.class::cast)
                     .map(CassandraColumnHandle::getColumnMetadata)
@@ -191,7 +191,7 @@ public class CassandraMetadata
         CassandraTable table = cassandraSession.getTable(getTableName(tableHandle));
         ImmutableMap.Builder<String, ColumnHandle> columnHandles = ImmutableMap.builder();
         for (CassandraColumnHandle columnHandle : table.getColumns()) {
-            columnHandles.put(cqlNameToSqlName(columnHandle.getName()).toLowerCase(ENGLISH), columnHandle);
+            columnHandles.put(cqlNameToSqlName(columnHandle.name()).toLowerCase(ENGLISH), columnHandle);
         }
         return columnHandles.buildOrThrow();
     }
@@ -388,7 +388,7 @@ public class CassandraMetadata
         List<CassandraColumnHandle> columns = cassandraSession.getTable(schemaTableName).getColumns();
         List<String> columnNames = columns.stream()
                 .filter(columnHandle -> !isHiddenIdColumn(columnHandle))
-                .map(CassandraColumnHandle::getName)
+                .map(CassandraColumnHandle::name)
                 .collect(Collectors.toList());
         List<Type> columnTypes = columns.stream()
                 .filter(columnHandle -> !isHiddenIdColumn(columnHandle))
@@ -408,14 +408,19 @@ public class CassandraMetadata
     }
 
     @Override
-    public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics)
+    public Optional<ConnectorOutputMetadata> finishInsert(
+            ConnectorSession session,
+            ConnectorInsertTableHandle insertHandle,
+            List<ConnectorTableHandle> sourceTableHandles,
+            Collection<Slice> fragments,
+            Collection<ComputedStatistics> computedStatistics)
     {
         return Optional.empty();
     }
 
     private static boolean isHiddenIdColumn(CassandraColumnHandle columnHandle)
     {
-        return columnHandle.isHidden() && ID_COLUMN_NAME.equals(columnHandle.getName());
+        return columnHandle.hidden() && ID_COLUMN_NAME.equals(columnHandle.name());
     }
 
     @Override
@@ -460,7 +465,7 @@ public class CassandraMetadata
         }
 
         CassandraTableHandle tableHandle = queryHandle.getTableHandle();
-        List<ColumnHandle> columnHandles = getColumnHandles(((CassandraQueryRelationHandle) tableHandle.getRelationHandle()).getQuery());
+        List<ColumnHandle> columnHandles = getColumnHandles(((CassandraQueryRelationHandle) tableHandle.relationHandle()).getQuery());
         return Optional.of(new TableFunctionApplicationResult<>(tableHandle, columnHandles));
     }
 

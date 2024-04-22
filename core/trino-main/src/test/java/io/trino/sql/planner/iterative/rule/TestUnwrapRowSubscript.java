@@ -14,19 +14,24 @@
 package io.trino.sql.planner.iterative.rule;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.sql.ir.Cast;
+import io.trino.sql.ir.Constant;
+import io.trino.sql.ir.Expression;
+import io.trino.sql.ir.FieldReference;
+import io.trino.sql.ir.Row;
 import io.trino.sql.planner.assertions.PlanMatchPattern;
 import io.trino.sql.planner.iterative.rule.test.BaseRuleTest;
 import io.trino.sql.planner.plan.Assignments;
-import io.trino.sql.tree.Cast;
-import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.LongLiteral;
-import io.trino.sql.tree.Row;
-import io.trino.sql.tree.SubscriptExpression;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
-import static io.trino.sql.planner.assertions.PlanMatchPattern.dataType;
+import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.RowType.anonymousRow;
+import static io.trino.spi.type.RowType.field;
+import static io.trino.spi.type.RowType.rowType;
+import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.project;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.values;
 
@@ -36,41 +41,48 @@ public class TestUnwrapRowSubscript
     @Test
     public void testSimpleSubscript()
     {
-        test(new SubscriptExpression(new Row(ImmutableList.of(new LongLiteral("1"))), new LongLiteral("1")), new LongLiteral("1"));
-        test(new SubscriptExpression(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), new LongLiteral("1")), new LongLiteral("1"));
-        test(new SubscriptExpression(new SubscriptExpression(new Row(ImmutableList.of(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), new LongLiteral("3"))), new LongLiteral("1")), new LongLiteral("2")), new LongLiteral("2"));
+        test(new FieldReference(new Row(ImmutableList.of(new Constant(INTEGER, 1L))), 0), new Constant(INTEGER, 1L));
+        test(new FieldReference(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), 0), new Constant(INTEGER, 1L));
+        test(new FieldReference(new FieldReference(new Row(ImmutableList.of(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), new Constant(INTEGER, 3L))), 0), 1), new Constant(INTEGER, 2L));
     }
 
     @Test
     public void testWithCast()
     {
         test(
-                new SubscriptExpression(new Cast(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), dataType("row(\"a\" bigint,\"b\" bigint)")), new LongLiteral("1")),
-                new Cast(new LongLiteral("1"), dataType("bigint")));
+                new FieldReference(new Cast(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), rowType(field("a", BIGINT), field("b", BIGINT))), 0),
+                new Cast(new Constant(INTEGER, 1L), BIGINT));
 
         test(
-                new SubscriptExpression(new Cast(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), dataType("row(bigint,bigint)")), new LongLiteral("1")),
-                new Cast(new LongLiteral("1"), dataType("bigint")));
+                new FieldReference(new Cast(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), anonymousRow(BIGINT, BIGINT)), 0),
+                new Cast(new Constant(INTEGER, 1L), BIGINT));
 
         test(
-                new SubscriptExpression(new Cast(new SubscriptExpression(new Cast(new Row(ImmutableList.of(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), new LongLiteral("3"))), dataType("row(row(smallint,smallint),bigint)")), new LongLiteral("1")), dataType("row(\"x\" bigint,\"y\" bigint)")), new LongLiteral("2")),
-                new Cast(new Cast(new LongLiteral("2"), dataType("smallint")), dataType("bigint")));
+                new FieldReference(
+                        new Cast(new FieldReference(
+                                new Cast(
+                                        new Row(ImmutableList.of(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), new Constant(INTEGER, 3L))),
+                                        anonymousRow(anonymousRow(SMALLINT, SMALLINT), BIGINT)),
+                                0),
+                                rowType(field("x", BIGINT), field("y", BIGINT))),
+                        1),
+                new Cast(new Cast(new Constant(INTEGER, 2L), SMALLINT), BIGINT));
     }
 
     @Test
     public void testWithTryCast()
     {
         test(
-                new SubscriptExpression(new Cast(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), dataType("row(\"a\" bigint,\"b\" bigint)"), true), new LongLiteral("1")),
-                new Cast(new LongLiteral("1"), dataType("bigint"), true));
+                new FieldReference(new Cast(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), rowType(field("a", BIGINT), field("b", BIGINT)), true), 0),
+                new Cast(new Constant(INTEGER, 1L), BIGINT, true));
 
         test(
-                new SubscriptExpression(new Cast(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), dataType("row(bigint,bigint)"), true), new LongLiteral("1")),
-                new Cast(new LongLiteral("1"), dataType("bigint"), true));
+                new FieldReference(new Cast(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), anonymousRow(BIGINT, BIGINT), true), 0),
+                new Cast(new Constant(INTEGER, 1L), BIGINT, true));
 
         test(
-                new SubscriptExpression(new Cast(new SubscriptExpression(new Cast(new Row(ImmutableList.of(new Row(ImmutableList.of(new LongLiteral("1"), new LongLiteral("2"))), new LongLiteral("3"))), dataType("row(row(smallint,smallint),bigint)"), true), new LongLiteral("1")), dataType("row(\"x\" bigint,\"y\" bigint)"), true), new LongLiteral("2")),
-                new Cast(new Cast(new LongLiteral("2"), dataType("smallint"), true), dataType("bigint"), true));
+                new FieldReference(new Cast(new FieldReference(new Cast(new Row(ImmutableList.of(new Row(ImmutableList.of(new Constant(INTEGER, 1L), new Constant(INTEGER, 2L))), new Constant(INTEGER, 3L))), anonymousRow(anonymousRow(SMALLINT, SMALLINT), BIGINT), true), 0), rowType(field("x", BIGINT), field("y", BIGINT)), true), 1),
+                new Cast(new Cast(new Constant(INTEGER, 2L), SMALLINT, true), BIGINT, true));
     }
 
     private void test(Expression original, Expression unwrapped)
@@ -78,7 +90,7 @@ public class TestUnwrapRowSubscript
         tester().assertThat(new UnwrapRowSubscript().projectExpressionRewrite())
                 .on(p -> p.project(
                         Assignments.builder()
-                                .put(p.symbol("output"), original)
+                                .put(p.symbol("output", original.type()), original)
                                 .build(),
                         p.values()))
                 .matches(

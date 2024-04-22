@@ -29,6 +29,7 @@ import io.trino.spi.connector.TableScanRedirectApplicationResult;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Type;
 import io.trino.sql.PlannerContext;
+import io.trino.sql.ir.Cast;
 import io.trino.sql.planner.DomainTranslator;
 import io.trino.sql.planner.PlanNodeIdAllocator;
 import io.trino.sql.planner.Symbol;
@@ -38,7 +39,6 @@ import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.sql.planner.plan.TableScanNode;
-import io.trino.sql.tree.Cast;
 
 import java.util.Map;
 import java.util.Optional;
@@ -49,7 +49,6 @@ import static io.trino.spi.StandardErrorCode.COLUMN_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.FUNCTION_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.StandardErrorCode.TABLE_NOT_FOUND;
-import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.trino.sql.planner.plan.Patterns.tableScan;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -115,7 +114,7 @@ public class ApplyTableScanRedirection
             }
 
             // insert ts if redirected types don't match source types
-            Type sourceType = context.getSymbolAllocator().getTypes().get(assignment.getKey());
+            Type sourceType = assignment.getKey().type();
             Type redirectedType = plannerContext.getMetadata().getColumnMetadata(context.getSession(), destinationTableHandle, destinationColumnHandle).getType();
             if (!sourceType.equals(redirectedType)) {
                 Symbol redirectedSymbol = context.getSymbolAllocator().newSymbol(destinationColumn, redirectedType);
@@ -208,7 +207,6 @@ public class ApplyTableScanRedirection
                 scanNode.isUpdateTarget(),
                 Optional.empty());
 
-        DomainTranslator domainTranslator = new DomainTranslator(plannerContext);
         FilterNode filterNode = new FilterNode(
                 context.getIdAllocator().getNextId(),
                 applyProjection(
@@ -216,7 +214,7 @@ public class ApplyTableScanRedirection
                         newAssignments.keySet(),
                         casts.buildOrThrow(),
                         newScanNode),
-                domainTranslator.toPredicate(transformedConstraint));
+                DomainTranslator.toPredicate(transformedConstraint));
 
         return Result.ofPlanNode(applyProjection(
                 context.getIdAllocator(),
@@ -270,7 +268,7 @@ public class ApplyTableScanRedirection
 
         return new Cast(
                 destinationSymbol.toSymbolReference(),
-                toSqlType(sourceType),
+                sourceType,
                 false);
     }
 }

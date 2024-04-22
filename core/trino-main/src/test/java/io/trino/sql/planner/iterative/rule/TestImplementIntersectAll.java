@@ -16,38 +16,56 @@ package io.trino.sql.planner.iterative.rule;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
+import io.trino.metadata.ResolvedFunction;
+import io.trino.metadata.TestingFunctionResolution;
+import io.trino.sql.ir.Call;
+import io.trino.sql.ir.Comparison;
+import io.trino.sql.ir.Constant;
+import io.trino.sql.ir.Reference;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.assertions.SetOperationOutputMatcher;
 import io.trino.sql.planner.iterative.rule.test.BaseRuleTest;
-import io.trino.sql.tree.Cast;
-import io.trino.sql.tree.ComparisonExpression;
-import io.trino.sql.tree.FunctionCall;
-import io.trino.sql.tree.NullLiteral;
-import io.trino.sql.tree.QualifiedName;
-import io.trino.sql.tree.SymbolReference;
+import io.trino.sql.planner.plan.WindowNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
-import static io.trino.sql.planner.assertions.PlanMatchPattern.dataType;
+import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.BooleanType.BOOLEAN;
+import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static io.trino.sql.ir.Booleans.TRUE;
+import static io.trino.sql.ir.Comparison.Operator.LESS_THAN_OR_EQUAL;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.expression;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.filter;
-import static io.trino.sql.planner.assertions.PlanMatchPattern.functionCall;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.project;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.specification;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.strictProject;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.union;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.values;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.window;
-import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
-import static io.trino.sql.tree.ComparisonExpression.Operator.LESS_THAN_OR_EQUAL;
+import static io.trino.sql.planner.assertions.PlanMatchPattern.windowFunction;
+import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_FOLLOWING;
+import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_PRECEDING;
+import static io.trino.sql.planner.plan.WindowFrameType.ROWS;
 
 public class TestImplementIntersectAll
         extends BaseRuleTest
 {
+    private static final TestingFunctionResolution FUNCTIONS = new TestingFunctionResolution();
+    private static final ResolvedFunction LEAST = FUNCTIONS.resolveFunction("least", fromTypes(BIGINT, BIGINT));
+
     @Test
     public void test()
     {
+        WindowNode.Frame frame = new WindowNode.Frame(
+                ROWS,
+                UNBOUNDED_PRECEDING,
+                Optional.empty(),
+                Optional.empty(),
+                UNBOUNDED_FOLLOWING,
+                Optional.empty(),
+                Optional.empty());
+
         tester().assertThat(new ImplementIntersectAll(tester().getMetadata()))
                 .on(p -> {
                     Symbol a = p.symbol("a");
@@ -71,17 +89,17 @@ public class TestImplementIntersectAll
                 .matches(
                         strictProject(
                                 ImmutableMap.of(
-                                        "a", expression(new SymbolReference("a")),
-                                        "b", expression(new SymbolReference("b"))),
+                                        "a", expression(new Reference(BIGINT, "a")),
+                                        "b", expression(new Reference(BIGINT, "b"))),
                                 filter(
-                                        new ComparisonExpression(LESS_THAN_OR_EQUAL, new SymbolReference("row_number"), new FunctionCall(QualifiedName.of("least"), ImmutableList.of(new SymbolReference("count_1"), new SymbolReference("count_2")))),
+                                        new Comparison(LESS_THAN_OR_EQUAL, new Reference(BIGINT, "row_number"), new Call(LEAST, ImmutableList.of(new Reference(BIGINT, "count_1"), new Reference(BIGINT, "count_2")))),
                                         strictProject(
                                                 ImmutableMap.of(
-                                                        "a", expression(new SymbolReference("a")),
-                                                        "b", expression(new SymbolReference("b")),
-                                                        "count_1", expression(new SymbolReference("count_1")),
-                                                        "count_2", expression(new SymbolReference("count_2")),
-                                                        "row_number", expression(new SymbolReference("row_number"))),
+                                                        "a", expression(new Reference(BIGINT, "a")),
+                                                        "b", expression(new Reference(BIGINT, "b")),
+                                                        "count_1", expression(new Reference(BIGINT, "count_1")),
+                                                        "count_2", expression(new Reference(BIGINT, "count_2")),
+                                                        "row_number", expression(new Reference(BIGINT, "row_number"))),
                                                 window(builder -> builder
                                                                 .specification(specification(
                                                                         ImmutableList.of("a", "b"),
@@ -89,36 +107,27 @@ public class TestImplementIntersectAll
                                                                         ImmutableMap.of()))
                                                                 .addFunction(
                                                                         "count_1",
-                                                                        functionCall(
-                                                                                "count",
-                                                                                Optional.empty(),
-                                                                                ImmutableList.of("marker_1")))
+                                                                        windowFunction("count", ImmutableList.of("marker_1"), frame))
                                                                 .addFunction(
                                                                         "count_2",
-                                                                        functionCall(
-                                                                                "count",
-                                                                                Optional.empty(),
-                                                                                ImmutableList.of("marker_2")))
+                                                                        windowFunction("count", ImmutableList.of("marker_2"), frame))
                                                                 .addFunction(
                                                                         "row_number",
-                                                                        functionCall(
-                                                                                "row_number",
-                                                                                Optional.empty(),
-                                                                                ImmutableList.of())),
+                                                                        windowFunction("row_number", ImmutableList.of(), frame)),
                                                         union(
                                                                 project(
                                                                         ImmutableMap.of(
-                                                                                "a1", expression(new SymbolReference("a_1")),
-                                                                                "b1", expression(new SymbolReference("b_1")),
-                                                                                "marker_left_1", expression(TRUE_LITERAL),
-                                                                                "marker_left_2", expression(new Cast(new NullLiteral(), dataType("boolean")))),
+                                                                                "a1", expression(new Reference(BIGINT, "a_1")),
+                                                                                "b1", expression(new Reference(BIGINT, "b_1")),
+                                                                                "marker_left_1", expression(TRUE),
+                                                                                "marker_left_2", expression(new Constant(BOOLEAN, null))),
                                                                         values("a_1", "b_1")),
                                                                 project(
                                                                         ImmutableMap.of(
-                                                                                "a2", expression(new SymbolReference("a_2")),
-                                                                                "b2", expression(new SymbolReference("b_2")),
-                                                                                "marker_right_1", expression(new Cast(new NullLiteral(), dataType("boolean"))),
-                                                                                "marker_right_2", expression(TRUE_LITERAL)),
+                                                                                "a2", expression(new Reference(BIGINT, "a_2")),
+                                                                                "b2", expression(new Reference(BIGINT, "b_2")),
+                                                                                "marker_right_1", expression(new Constant(BOOLEAN, null)),
+                                                                                "marker_right_2", expression(TRUE)),
                                                                         values("a_2", "b_2")))
                                                                 .withAlias("a", new SetOperationOutputMatcher(0))
                                                                 .withAlias("b", new SetOperationOutputMatcher(1))

@@ -28,7 +28,6 @@ import io.trino.SystemSessionProperties;
 import io.trino.client.NodeVersion;
 import io.trino.connector.CatalogFactory;
 import io.trino.connector.CatalogServiceProviderModule;
-import io.trino.connector.ConnectorName;
 import io.trino.connector.ConnectorServicesProvider;
 import io.trino.connector.CoordinatorDynamicCatalogManager;
 import io.trino.connector.DefaultCatalogFactory;
@@ -45,12 +44,14 @@ import io.trino.connector.system.SchemaPropertiesSystemTable;
 import io.trino.connector.system.TableCommentSystemTable;
 import io.trino.connector.system.TablePropertiesSystemTable;
 import io.trino.connector.system.TransactionsSystemTable;
+import io.trino.cost.CachingTableStatsProvider;
 import io.trino.cost.ComposableStatsCalculator;
 import io.trino.cost.CostCalculator;
 import io.trino.cost.CostCalculatorUsingExchanges;
 import io.trino.cost.CostCalculatorWithEstimatedExchanges;
 import io.trino.cost.CostComparator;
 import io.trino.cost.FilterStatsCalculator;
+import io.trino.cost.RuntimeInfoProvider;
 import io.trino.cost.ScalarStatsCalculator;
 import io.trino.cost.StatsCalculator;
 import io.trino.cost.StatsCalculatorModule.StatsRulesProvider;
@@ -90,7 +91,6 @@ import io.trino.metadata.InternalBlockEncodingSerde;
 import io.trino.metadata.InternalFunctionBundle;
 import io.trino.metadata.InternalNodeManager;
 import io.trino.metadata.LanguageFunctionManager;
-import io.trino.metadata.LiteralFunction;
 import io.trino.metadata.MaterializedViewPropertyManager;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.MetadataManager;
@@ -105,9 +105,11 @@ import io.trino.metadata.TableProceduresPropertyManager;
 import io.trino.metadata.TableProceduresRegistry;
 import io.trino.metadata.TablePropertyManager;
 import io.trino.metadata.TypeRegistry;
+import io.trino.metadata.ViewPropertyManager;
 import io.trino.operator.Driver;
 import io.trino.operator.DriverContext;
 import io.trino.operator.DriverFactory;
+import io.trino.operator.FlatHashStrategyCompiler;
 import io.trino.operator.GroupByHashPageIndexerFactory;
 import io.trino.operator.PagesIndex;
 import io.trino.operator.PagesIndexPageSorter;
@@ -130,9 +132,11 @@ import io.trino.server.security.PasswordAuthenticatorManager;
 import io.trino.spi.PageIndexerFactory;
 import io.trino.spi.PageSorter;
 import io.trino.spi.Plugin;
+import io.trino.spi.catalog.CatalogName;
 import io.trino.spi.connector.CatalogHandle;
 import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorFactory;
+import io.trino.spi.connector.ConnectorName;
 import io.trino.spi.type.TypeManager;
 import io.trino.spi.type.TypeOperators;
 import io.trino.spiller.GenericSpillerFactory;
@@ -153,8 +157,8 @@ import io.trino.sql.gen.JoinFilterFunctionCompiler;
 import io.trino.sql.gen.OrderingCompiler;
 import io.trino.sql.gen.PageFunctionCompiler;
 import io.trino.sql.parser.SqlParser;
+import io.trino.sql.planner.AdaptivePlanner;
 import io.trino.sql.planner.CompilerConfig;
-import io.trino.sql.planner.IrTypeAnalyzer;
 import io.trino.sql.planner.LocalExecutionPlanner;
 import io.trino.sql.planner.LocalExecutionPlanner.LocalExecutionPlan;
 import io.trino.sql.planner.LogicalPlanner;
@@ -164,8 +168,10 @@ import io.trino.sql.planner.Plan;
 import io.trino.sql.planner.PlanFragmenter;
 import io.trino.sql.planner.PlanNodeIdAllocator;
 import io.trino.sql.planner.PlanOptimizers;
+import io.trino.sql.planner.PlanOptimizersFactory;
 import io.trino.sql.planner.RuleStatsRecorder;
 import io.trino.sql.planner.SubPlan;
+import io.trino.sql.planner.optimizations.AdaptivePlanOptimizer;
 import io.trino.sql.planner.optimizations.PlanOptimizer;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanNodeId;
@@ -203,6 +209,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
@@ -222,6 +229,7 @@ import static io.trino.connector.CatalogServiceProviderModule.createTableFunctio
 import static io.trino.connector.CatalogServiceProviderModule.createTableProceduresPropertyManager;
 import static io.trino.connector.CatalogServiceProviderModule.createTableProceduresProvider;
 import static io.trino.connector.CatalogServiceProviderModule.createTablePropertyManager;
+import static io.trino.connector.CatalogServiceProviderModule.createViewPropertyManager;
 import static io.trino.execution.ParameterExtractor.bindParameters;
 import static io.trino.execution.querystats.PlanOptimizersStatsCollector.createPlanOptimizersStatsCollector;
 import static io.trino.execution.warnings.WarningCollector.NOOP;
@@ -270,6 +278,7 @@ public class PlanTester
     private final SchemaPropertyManager schemaPropertyManager;
     private final ColumnPropertyManager columnPropertyManager;
     private final TablePropertyManager tablePropertyManager;
+    private final ViewPropertyManager viewPropertyManager;
     private final MaterializedViewPropertyManager materializedViewPropertyManager;
     private final AnalyzePropertyManager analyzePropertyManager;
 
@@ -277,6 +286,7 @@ public class PlanTester
     private final ExpressionCompiler expressionCompiler;
     private final JoinFilterFunctionCompiler joinFilterFunctionCompiler;
     private final JoinCompiler joinCompiler;
+    private final FlatHashStrategyCompiler hashStrategyCompiler;
     private final CatalogFactory catalogFactory;
     private final CoordinatorDynamicCatalogManager catalogManager;
     private final PluginManager pluginManager;
@@ -333,10 +343,9 @@ public class PlanTester
                 () -> getPlannerContext().getMetadata(),
                 () -> getPlannerContext().getTypeManager(),
                 () -> getPlannerContext().getFunctionManager());
-        globalFunctionCatalog.addFunctions(new InternalFunctionBundle(new LiteralFunction(blockEncodingSerde)));
         globalFunctionCatalog.addFunctions(SystemFunctionBundle.create(new FeaturesConfig(), typeOperators, blockTypeOperators, nodeManager.getCurrentNode().getNodeVersion()));
         TestingGroupProviderManager groupProvider = new TestingGroupProviderManager();
-        LanguageFunctionManager languageFunctionManager = new LanguageFunctionManager(sqlParser, typeManager, groupProvider);
+        LanguageFunctionManager languageFunctionManager = new LanguageFunctionManager(sqlParser, typeManager, groupProvider, blockEncodingSerde);
         Metadata metadata = new MetadataManager(
                 new DisabledSystemSecurityMetadata(),
                 transactionManager,
@@ -345,7 +354,8 @@ public class PlanTester
                 typeManager);
         typeRegistry.addType(new JsonPath2016Type(new TypeDeserializer(typeManager), blockEncodingSerde));
         this.joinCompiler = new JoinCompiler(typeOperators);
-        PageIndexerFactory pageIndexerFactory = new GroupByHashPageIndexerFactory(joinCompiler);
+        this.hashStrategyCompiler = new FlatHashStrategyCompiler(typeOperators);
+        PageIndexerFactory pageIndexerFactory = new GroupByHashPageIndexerFactory(hashStrategyCompiler);
         EventListenerManager eventListenerManager = new EventListenerManager(new EventListenerConfig());
         this.accessControl = new TestingAccessControlManager(transactionManager, eventListenerManager);
         accessControl.loadSystemAccessControl(AllowAllSystemAccessControl.NAME, ImmutableMap.of());
@@ -377,6 +387,7 @@ public class PlanTester
         this.schemaPropertyManager = createSchemaPropertyManager(catalogManager);
         this.columnPropertyManager = createColumnPropertyManager(catalogManager);
         this.tablePropertyManager = createTablePropertyManager(catalogManager);
+        this.viewPropertyManager = createViewPropertyManager(catalogManager);
         this.materializedViewPropertyManager = createMaterializedViewPropertyManager(catalogManager);
         this.analyzePropertyManager = createAnalyzePropertyManager(catalogManager);
         TableProceduresPropertyManager tableProceduresPropertyManager = createTableProceduresPropertyManager(catalogManager);
@@ -405,9 +416,8 @@ public class PlanTester
                 tablePropertyManager,
                 analyzePropertyManager,
                 tableProceduresPropertyManager);
-        IrTypeAnalyzer typeAnalyzer = new IrTypeAnalyzer(plannerContext);
-        this.statsCalculator = createNewStatsCalculator(plannerContext, typeAnalyzer);
-        this.scalarStatsCalculator = new ScalarStatsCalculator(plannerContext, typeAnalyzer);
+        this.statsCalculator = createNewStatsCalculator(plannerContext);
+        this.scalarStatsCalculator = new ScalarStatsCalculator(plannerContext);
         this.taskCountEstimator = new TaskCountEstimator(() -> nodeCountForStats);
         this.costCalculator = new CostCalculatorUsingExchanges(taskCountEstimator);
         this.estimatedExchangesCostCalculator = new CostCalculatorWithEstimatedExchanges(costCalculator, taskCountEstimator);
@@ -431,6 +441,7 @@ public class PlanTester
         exchangeManagerRegistry = new ExchangeManagerRegistry(OpenTelemetry.noop(), noopTracer());
         this.pluginManager = new PluginManager(
                 (loader, createClassLoader) -> {},
+                Optional.empty(),
                 catalogFactory,
                 globalFunctionCatalog,
                 new NoOpResourceGroupManager(),
@@ -496,12 +507,12 @@ public class PlanTester
         return CatalogServiceProviderModule.createSessionPropertyManager(ImmutableSet.of(sessionProperties), connectorServicesProvider);
     }
 
-    private static StatsCalculator createNewStatsCalculator(PlannerContext plannerContext, IrTypeAnalyzer typeAnalyzer)
+    private static StatsCalculator createNewStatsCalculator(PlannerContext plannerContext)
     {
         StatsNormalizer normalizer = new StatsNormalizer();
-        ScalarStatsCalculator scalarStatsCalculator = new ScalarStatsCalculator(plannerContext, typeAnalyzer);
-        FilterStatsCalculator filterStatsCalculator = new FilterStatsCalculator(plannerContext, scalarStatsCalculator, normalizer, typeAnalyzer);
-        return new ComposableStatsCalculator(new StatsRulesProvider(plannerContext, scalarStatsCalculator, filterStatsCalculator, normalizer).get());
+        ScalarStatsCalculator scalarStatsCalculator = new ScalarStatsCalculator(plannerContext);
+        FilterStatsCalculator filterStatsCalculator = new FilterStatsCalculator(plannerContext, scalarStatsCalculator, normalizer);
+        return new ComposableStatsCalculator(new StatsRulesProvider(scalarStatsCalculator, filterStatsCalculator, normalizer).get());
     }
 
     @Override
@@ -581,7 +592,7 @@ public class PlanTester
     public void createCatalog(String catalogName, ConnectorFactory connectorFactory, Map<String, String> properties)
     {
         catalogFactory.addConnectorFactory(connectorFactory);
-        catalogManager.createCatalog(catalogName, new ConnectorName(connectorFactory.getName()), properties, false);
+        catalogManager.createCatalog(new CatalogName(catalogName), new ConnectorName(connectorFactory.getName()), properties, false);
     }
 
     public void installPlugin(Plugin plugin)
@@ -596,7 +607,7 @@ public class PlanTester
 
     public void createCatalog(String catalogName, String connectorName, Map<String, String> properties)
     {
-        catalogManager.createCatalog(catalogName, new ConnectorName(connectorName), properties, false);
+        catalogManager.createCatalog(new CatalogName(catalogName), new ConnectorName(connectorName), properties, false);
     }
 
     public CatalogManager getCatalogManager()
@@ -645,7 +656,7 @@ public class PlanTester
 
     public void executeStatement(@Language("SQL") String sql)
     {
-        accessControl.checkCanExecuteQuery(defaultSession.getIdentity());
+        accessControl.checkCanExecuteQuery(defaultSession.getIdentity(), defaultSession.getQueryId());
 
         inTransaction(defaultSession, transactionSession -> {
             try (Closer closer = Closer.create()) {
@@ -683,7 +694,6 @@ public class PlanTester
         if (printPlan) {
             System.out.println(PlanPrinter.textLogicalPlan(
                     plan.getRoot(),
-                    plan.getTypes(),
                     plannerContext.getMetadata(),
                     plannerContext.getFunctionManager(),
                     plan.getStatsAndCosts(),
@@ -702,7 +712,6 @@ public class PlanTester
         tableExecuteContextManager.registerTableExecuteContextForQuery(taskContext.getQueryContext().getQueryId());
         LocalExecutionPlanner executionPlanner = new LocalExecutionPlanner(
                 plannerContext,
-                new IrTypeAnalyzer(plannerContext),
                 Optional.empty(),
                 pageSourceManager,
                 indexManager,
@@ -719,6 +728,7 @@ public class PlanTester
                 unsupportedPartitioningSpillerFactory(),
                 new PagesIndex.TestingFactory(false),
                 joinCompiler,
+                hashStrategyCompiler,
                 new OrderingCompiler(plannerContext.getTypeOperators()),
                 new DynamicFilterConfig(),
                 blockTypeOperators,
@@ -733,7 +743,6 @@ public class PlanTester
                 taskContext,
                 subplan.getFragment().getRoot(),
                 subplan.getFragment().getOutputPartitioningScheme().getOutputLayout(),
-                plan.getTypes(),
                 subplan.getFragment().getPartitionedSources(),
                 new NullOutputFactory());
 
@@ -804,9 +813,18 @@ public class PlanTester
 
     public List<PlanOptimizer> getPlanOptimizers(boolean forceSingleNode)
     {
+        return getPlanOptimizersFactory(forceSingleNode).getPlanOptimizers();
+    }
+
+    public List<AdaptivePlanOptimizer> getAdaptivePlanOptimizers()
+    {
+        return getPlanOptimizersFactory(false).getAdaptivePlanOptimizers();
+    }
+
+    public PlanOptimizersFactory getPlanOptimizersFactory(boolean forceSingleNode)
+    {
         return new PlanOptimizers(
                 plannerContext,
-                new IrTypeAnalyzer(plannerContext),
                 taskManagerConfig,
                 forceSingleNode,
                 splitManager,
@@ -818,7 +836,7 @@ public class PlanTester
                 new CostComparator(optimizerConfig),
                 taskCountEstimator,
                 nodePartitioningManager,
-                new RuleStatsRecorder()).get();
+                new RuleStatsRecorder());
     }
 
     public Plan createPlan(Session session, @Language("SQL") String sql, List<PlanOptimizer> optimizers, LogicalPlanner.Stage stage, WarningCollector warningCollector, PlanOptimizersStatsCollector planOptimizersStatsCollector)
@@ -846,26 +864,58 @@ public class PlanTester
                 new PlanSanityChecker(true),
                 idAllocator,
                 getPlannerContext(),
-                new IrTypeAnalyzer(plannerContext),
                 statsCalculator,
                 costCalculator,
                 warningCollector,
-                planOptimizersStatsCollector);
+                planOptimizersStatsCollector,
+                new CachingTableStatsProvider(getPlannerContext().getMetadata(), session));
 
         Analysis analysis = analyzer.analyze(preparedQuery.getStatement());
         // make PlanTester always compute plan statistics for test purposes
         return logicalPlanner.plan(analysis, stage);
     }
 
+    public SubPlan createAdaptivePlan(Session session, SubPlan subPlan, List<AdaptivePlanOptimizer> optimizers, WarningCollector warningCollector, PlanOptimizersStatsCollector planOptimizersStatsCollector, RuntimeInfoProvider runtimeInfoProvider)
+    {
+        AdaptivePlanner adaptivePlanner = new AdaptivePlanner(
+                session,
+                getPlannerContext(),
+                optimizers,
+                planFragmenter,
+                new PlanSanityChecker(false),
+                warningCollector,
+                planOptimizersStatsCollector,
+                new CachingTableStatsProvider(getPlannerContext().getMetadata(), session));
+        return adaptivePlanner.optimize(subPlan, runtimeInfoProvider);
+    }
+
     private QueryExplainerFactory createQueryExplainerFactory(List<PlanOptimizer> optimizers)
     {
         return new QueryExplainerFactory(
-                () -> optimizers,
+                createPlanOptimizersFactory(optimizers),
                 planFragmenter,
                 plannerContext,
                 statsCalculator,
                 costCalculator,
                 new NodeVersion("test"));
+    }
+
+    private PlanOptimizersFactory createPlanOptimizersFactory(List<PlanOptimizer> optimizers)
+    {
+        return new PlanOptimizersFactory()
+        {
+            @Override
+            public List<PlanOptimizer> getPlanOptimizers()
+            {
+                return optimizers;
+            }
+
+            @Override
+            public List<AdaptivePlanOptimizer> getAdaptivePlanOptimizers()
+            {
+                throw new UnsupportedOperationException();
+            }
+        };
     }
 
     private AnalyzerFactory createAnalyzerFactory(QueryExplainerFactory queryExplainerFactory)
@@ -883,6 +933,7 @@ public class PlanTester
                                 schemaPropertyManager,
                                 columnPropertyManager,
                                 tablePropertyManager,
+                                viewPropertyManager,
                                 materializedViewPropertyManager),
                         new ShowStatsRewrite(plannerContext.getMetadata(), queryExplainerFactory, statsCalculator),
                         new ExplainRewrite(queryExplainerFactory, new QueryPreparer(sqlParser)))),
@@ -898,6 +949,8 @@ public class PlanTester
     {
         return searchFrom(node)
                 .where(TableScanNode.class::isInstance)
-                .findAll();
+                .findAll().stream()
+                .map(TableScanNode.class::cast)
+                .collect(toImmutableList());
     }
 }

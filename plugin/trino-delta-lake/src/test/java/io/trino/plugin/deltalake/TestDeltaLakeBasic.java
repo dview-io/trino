@@ -683,10 +683,10 @@ public class TestDeltaLakeBasic
         List<DeltaLakeTransactionLogEntry> transactionLogs = getEntriesFromJson(0, tableLocation + "/_delta_log", FILE_SYSTEM).orElseThrow();
         ProtocolEntry protocolEntry = transactionLogs.get(1).getProtocol();
         assertThat(protocolEntry).isNotNull();
-        assertThat(protocolEntry.getMinReaderVersion()).isEqualTo(3);
-        assertThat(protocolEntry.getMinWriterVersion()).isEqualTo(7);
-        assertThat(protocolEntry.getReaderFeatures()).isEqualTo(Optional.of(ImmutableSet.of("timestampNtz")));
-        assertThat(protocolEntry.getWriterFeatures()).isEqualTo(Optional.of(ImmutableSet.of("timestampNtz")));
+        assertThat(protocolEntry.minReaderVersion()).isEqualTo(3);
+        assertThat(protocolEntry.minWriterVersion()).isEqualTo(7);
+        assertThat(protocolEntry.readerFeatures()).hasValue(ImmutableSet.of("timestampNtz"));
+        assertThat(protocolEntry.writerFeatures()).hasValue(ImmutableSet.of("timestampNtz"));
 
         // Insert rows and verify results
         assertUpdate(session,
@@ -876,18 +876,18 @@ public class TestDeltaLakeBasic
         List<DeltaLakeTransactionLogEntry> transactionLogsByCreateTable = getEntriesFromJson(0, tableLocation + "/_delta_log", FILE_SYSTEM).orElseThrow();
         ProtocolEntry protocolEntryByCreateTable = transactionLogsByCreateTable.get(1).getProtocol();
         assertThat(protocolEntryByCreateTable).isNotNull();
-        assertThat(protocolEntryByCreateTable.getMinReaderVersion()).isEqualTo(1);
-        assertThat(protocolEntryByCreateTable.getMinWriterVersion()).isEqualTo(2);
-        assertThat(protocolEntryByCreateTable.getReaderFeatures()).isEmpty();
-        assertThat(protocolEntryByCreateTable.getWriterFeatures()).isEmpty();
+        assertThat(protocolEntryByCreateTable.minReaderVersion()).isEqualTo(1);
+        assertThat(protocolEntryByCreateTable.minWriterVersion()).isEqualTo(2);
+        assertThat(protocolEntryByCreateTable.readerFeatures()).isEmpty();
+        assertThat(protocolEntryByCreateTable.writerFeatures()).isEmpty();
 
         List<DeltaLakeTransactionLogEntry> transactionLogsByAddColumn = getEntriesFromJson(1, tableLocation + "/_delta_log", FILE_SYSTEM).orElseThrow();
         ProtocolEntry protocolEntryByAddColumn = transactionLogsByAddColumn.get(1).getProtocol();
         assertThat(protocolEntryByAddColumn).isNotNull();
-        assertThat(protocolEntryByAddColumn.getMinReaderVersion()).isEqualTo(3);
-        assertThat(protocolEntryByAddColumn.getMinWriterVersion()).isEqualTo(7);
-        assertThat(protocolEntryByAddColumn.getReaderFeatures()).isEqualTo(Optional.of(ImmutableSet.of("timestampNtz")));
-        assertThat(protocolEntryByAddColumn.getWriterFeatures()).isEqualTo(Optional.of(ImmutableSet.of("timestampNtz")));
+        assertThat(protocolEntryByAddColumn.minReaderVersion()).isEqualTo(3);
+        assertThat(protocolEntryByAddColumn.minWriterVersion()).isEqualTo(7);
+        assertThat(protocolEntryByAddColumn.readerFeatures()).hasValue(ImmutableSet.of("timestampNtz"));
+        assertThat(protocolEntryByAddColumn.writerFeatures()).hasValue(ImmutableSet.of("timestampNtz"));
 
         assertUpdate("DROP TABLE " + tableName);
     }
@@ -1001,6 +1001,7 @@ public class TestDeltaLakeBasic
         assertQueryFails("COMMENT ON COLUMN " + tableName + ".foo IS NULL", "Metadata not found in transaction log for tpch." + tableName);
         assertQueryFails("CALL system.vacuum(CURRENT_SCHEMA, '" + tableName + "', '7d')", "Metadata not found in transaction log for tpch." + tableName);
         assertQueryFails("SELECT * FROM TABLE(system.table_changes('tpch', '" + tableName + "'))", "Metadata not found in transaction log for tpch." + tableName);
+        assertQueryFails("CREATE OR REPLACE TABLE " + tableName + " (id INTEGER)", "Metadata not found in transaction log for tpch." + tableName);
         assertQuerySucceeds("CALL system.drop_extended_stats(CURRENT_SCHEMA, '" + tableName + "')");
 
         // Avoid failing metadata queries
@@ -1060,6 +1061,61 @@ public class TestDeltaLakeBasic
         assertUpdate("CALL system.register_table('%s', '%s', '%s')".formatted(getSession().getSchema().orElseThrow(), tableName, tableLocation.toUri()));
         assertThat(query("DESCRIBE " + tableName)).result().projected("Column", "Type").skippingTypesCheck().matches("VALUES ('c', 'integer')");
         assertThat(query("SELECT * FROM " + tableName)).matches("VALUES 1, 2, 3, 4, 5, 6, 7");
+    }
+
+    @Test
+    public void testTimeTravelWithMultipartCheckpoint()
+            throws Exception
+    {
+        String tableName = "test_time_travel_multipart_checkpoint_" + randomNameSuffix();
+        Path tableLocation = Files.createTempFile(tableName, null);
+        copyDirectoryContents(new File(Resources.getResource("deltalake/multipart_checkpoint").toURI()).toPath(), tableLocation);
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')".formatted(tableName, tableLocation.toUri()));
+
+        // Version 6 has multipart checkpoint
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 5")).matches("VALUES 1, 2, 3, 4, 5");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 6")).matches("VALUES 1, 2, 3, 4, 5, 6");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 7")).matches("VALUES 1, 2, 3, 4, 5, 6, 7");
+
+        // Redo the time travel without _last_checkpoint file
+        Files.delete(tableLocation.resolve("_delta_log/_last_checkpoint"));
+        assertUpdate("CALL system.flush_metadata_cache(schema_name => CURRENT_SCHEMA, table_name => '" + tableName + "')");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 5")).matches("VALUES 1, 2, 3, 4, 5");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 6")).matches("VALUES 1, 2, 3, 4, 5, 6");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 7")).matches("VALUES 1, 2, 3, 4, 5, 6, 7");
+
+        assertUpdate("DROP TABLE " + tableName);
+    }
+
+    @Test
+    public void testTimeTravelWithV2Checkpoint()
+            throws Exception
+    {
+        testTimeTravelWithV2Checkpoint("deltalake/v2_checkpoint_json");
+        testTimeTravelWithV2Checkpoint("deltalake/v2_checkpoint_parquet");
+        testTimeTravelWithV2Checkpoint("databricks133/v2_checkpoint_json");
+        testTimeTravelWithV2Checkpoint("databricks133/v2_checkpoint_parquet");
+    }
+
+    private void testTimeTravelWithV2Checkpoint(String resourceName)
+            throws Exception
+    {
+        String tableName = "test_time_travel_v2_checkpoint_" + randomNameSuffix();
+        Path tableLocation = Files.createTempFile(tableName, null);
+        copyDirectoryContents(new File(Resources.getResource(resourceName).toURI()).toPath(), tableLocation);
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')".formatted(tableName, tableLocation.toUri()));
+
+        // Version 1 has v2 checkpoint
+        assertQueryReturnsEmptyResult("SELECT * FROM " + tableName + " FOR VERSION AS OF 0");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 1")).matches("VALUES (1, 2)");
+
+        // Redo the time travel without _last_checkpoint file
+        Files.delete(tableLocation.resolve("_delta_log/_last_checkpoint"));
+        assertUpdate("CALL system.flush_metadata_cache(schema_name => CURRENT_SCHEMA, table_name => '" + tableName + "')");
+        assertQueryReturnsEmptyResult("SELECT * FROM " + tableName + " FOR VERSION AS OF 0");
+        assertThat(query("SELECT * FROM " + tableName + " FOR VERSION AS OF 1")).matches("VALUES (1, 2)");
+
+        assertUpdate("DROP TABLE " + tableName);
     }
 
     /**
@@ -1321,6 +1377,53 @@ public class TestDeltaLakeBasic
     {
         assertThat(query("SELECT id FROM " + tableName + " WHERE " + condition))
                 .matches("VALUES " + id);
+    }
+
+    @Test
+    public void testReadV2Checkpoint()
+            throws Exception
+    {
+        testReadV2Checkpoint("deltalake/v2_checkpoint_json");
+        testReadV2Checkpoint("deltalake/v2_checkpoint_parquet");
+        testReadV2Checkpoint("databricks133/v2_checkpoint_json");
+        testReadV2Checkpoint("databricks133/v2_checkpoint_parquet");
+    }
+
+    private void testReadV2Checkpoint(String resourceName)
+            throws Exception
+    {
+        String tableName = "test_v2_checkpoint_" + randomNameSuffix();
+        Path tableLocation = Files.createTempFile(tableName, null);
+        Path source = new File(Resources.getResource(resourceName).toURI()).toPath();
+        copyDirectoryContents(source, tableLocation);
+        assertThat(source.resolve("_delta_log/_last_checkpoint"))
+                .content().contains("v2Checkpoint").contains("sidecar");
+
+        assertUpdate("CALL system.register_table('%s', '%s', '%s')".formatted(getSession().getSchema().orElseThrow(), tableName, tableLocation.toUri()));
+        assertThat(query("DESCRIBE " + tableName))
+                .result()
+                .projected("Column", "Type")
+                .skippingTypesCheck()
+                .matches("VALUES ('a', 'integer'), ('b', 'integer')");
+        assertQuery("SELECT * FROM " + tableName, "VALUES (1, 2)");
+
+        // Write-operations should fail
+        assertQueryFails(
+                "INSERT INTO " + tableName + " VALUES (3, 4)",
+                "\\QUnsupported writer features: [v2Checkpoint]");
+        assertQueryFails(
+                "UPDATE " + tableName + " SET a = 10",
+                "\\QUnsupported writer features: [v2Checkpoint]");
+        assertQueryFails(
+                "DELETE FROM " + tableName,
+                "\\QUnsupported writer features: [v2Checkpoint]");
+        assertQueryFails(
+                "TRUNCATE TABLE " + tableName,
+                "\\QUnsupported writer features: [v2Checkpoint]");
+        assertQueryFails(
+                "MERGE INTO " + tableName + " USING (VALUES 42) t(dummy) ON false WHEN NOT MATCHED THEN INSERT VALUES (3, 4)",
+                "\\QUnsupported writer features: [v2Checkpoint]");
+        assertQuery("SELECT * FROM " + tableName, "VALUES (1, 2)");
     }
 
     private static MetadataEntry loadMetadataEntry(long entryNumber, Path tableLocation)

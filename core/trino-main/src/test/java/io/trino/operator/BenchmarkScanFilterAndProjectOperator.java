@@ -15,6 +15,7 @@ package io.trino.operator;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
 import io.trino.SequencePageBuilder;
 import io.trino.Session;
@@ -28,24 +29,21 @@ import io.trino.spi.Page;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.connector.FixedPageSource;
+import io.trino.spi.function.OperatorType;
 import io.trino.spi.type.Type;
 import io.trino.sql.PlannerContext;
 import io.trino.sql.gen.ExpressionCompiler;
 import io.trino.sql.gen.PageFunctionCompiler;
-import io.trino.sql.planner.IrTypeAnalyzer;
+import io.trino.sql.ir.Call;
+import io.trino.sql.ir.Cast;
+import io.trino.sql.ir.Comparison;
+import io.trino.sql.ir.Constant;
+import io.trino.sql.ir.Expression;
+import io.trino.sql.ir.Reference;
 import io.trino.sql.planner.Symbol;
-import io.trino.sql.planner.TypeProvider;
 import io.trino.sql.planner.plan.PlanNodeId;
 import io.trino.sql.relational.RowExpression;
 import io.trino.sql.relational.SqlToRowExpressionTranslator;
-import io.trino.sql.tree.ArithmeticBinaryExpression;
-import io.trino.sql.tree.Cast;
-import io.trino.sql.tree.ComparisonExpression;
-import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.FunctionCall;
-import io.trino.sql.tree.LongLiteral;
-import io.trino.sql.tree.StringLiteral;
-import io.trino.sql.tree.SymbolReference;
 import io.trino.testing.TestingMetadata.TestingColumnHandle;
 import io.trino.testing.TestingSession;
 import io.trino.testing.TestingTaskContext;
@@ -80,13 +78,11 @@ import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
 import static io.trino.jmh.Benchmarks.benchmark;
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static io.trino.sql.ir.Comparison.Operator.EQUAL;
 import static io.trino.sql.planner.TestingPlannerContext.plannerContextBuilder;
-import static io.trino.sql.planner.assertions.PlanMatchPattern.dataType;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.ADD;
-import static io.trino.sql.tree.ArithmeticBinaryExpression.Operator.MODULUS;
-import static io.trino.sql.tree.ComparisonExpression.Operator.EQUAL;
 import static io.trino.testing.TestingHandles.TEST_CATALOG_HANDLE;
 import static io.trino.testing.TestingHandles.TEST_TABLE_HANDLE;
 import static io.trino.testing.TestingSplit.createLocalSplit;
@@ -120,11 +116,13 @@ public class BenchmarkScanFilterAndProjectOperator
 
     private static final TestingFunctionResolution FUNCTIONS = new TestingFunctionResolution();
     private static final ResolvedFunction CONCAT = FUNCTIONS.resolveFunction("concat", fromTypes(VARCHAR, VARCHAR));
+    private static final ResolvedFunction MODULUS_INTEGER = FUNCTIONS.resolveOperator(OperatorType.MODULUS, ImmutableList.of(INTEGER, INTEGER));
+    private static final ResolvedFunction MODULUS_BIGINT = FUNCTIONS.resolveOperator(OperatorType.MODULUS, ImmutableList.of(BIGINT, BIGINT));
+    private static final ResolvedFunction ADD_BIGINT = FUNCTIONS.resolveOperator(OperatorType.ADD, ImmutableList.of(BIGINT, BIGINT));
 
     @State(Thread)
     public static class Context
     {
-        private final Map<Symbol, Type> symbolTypes = new HashMap<>();
         private final Map<Symbol, Integer> sourceLayout = new HashMap<>();
 
         private ExecutorService executor;
@@ -152,8 +150,7 @@ public class BenchmarkScanFilterAndProjectOperator
             Type type = TYPE_MAP.get(this.type);
 
             for (int i = 0; i < columnCount; i++) {
-                Symbol symbol = new Symbol(type.getDisplayName().toLowerCase(ENGLISH) + i);
-                symbolTypes.put(symbol, type);
+                Symbol symbol = new Symbol(type, type.getDisplayName().toLowerCase(ENGLISH) + i);
                 sourceLayout.put(symbol, i);
             }
 
@@ -217,10 +214,10 @@ public class BenchmarkScanFilterAndProjectOperator
         private RowExpression getFilter(Type type)
         {
             if (type == VARCHAR) {
-                return rowExpression(new ComparisonExpression(EQUAL, new ArithmeticBinaryExpression(MODULUS, new Cast(new SymbolReference("varchar0"), dataType("bigint")), new LongLiteral("2")), new LongLiteral("0")));
+                return rowExpression(new Comparison(EQUAL, new Call(MODULUS_INTEGER, ImmutableList.of(new Cast(new Reference(VARCHAR, "varchar0"), INTEGER), new Constant(INTEGER, 2L))), new Constant(INTEGER, 0L)));
             }
             if (type == BIGINT) {
-                return rowExpression(new ComparisonExpression(EQUAL, new ArithmeticBinaryExpression(MODULUS, new SymbolReference("bigint0"), new LongLiteral("2")), new LongLiteral("0")));
+                return rowExpression(new Comparison(EQUAL, new Call(MODULUS_BIGINT, ImmutableList.of(new Reference(INTEGER, "bigint0"), new Constant(INTEGER, 2L))), new Constant(INTEGER, 0L)));
             }
             throw new IllegalArgumentException("filter not supported for type : " + type);
         }
@@ -230,14 +227,14 @@ public class BenchmarkScanFilterAndProjectOperator
             ImmutableList.Builder<RowExpression> builder = ImmutableList.builder();
             if (type == BIGINT) {
                 for (int i = 0; i < columnCount; i++) {
-                    builder.add(rowExpression(new ArithmeticBinaryExpression(ADD, new SymbolReference("bigint" + i), new LongLiteral("5"))));
+                    builder.add(rowExpression(new Call(ADD_BIGINT, ImmutableList.of(new Reference(BIGINT, "bigint" + i), new Constant(BIGINT, 5L)))));
                 }
             }
             else if (type == VARCHAR) {
                 for (int i = 0; i < columnCount; i++) {
                     // alternatively use identity expression rowExpression("varchar" + i, type) or
                     // rowExpression("substr(varchar" + i + ", 1, 1)", type)
-                    builder.add(rowExpression(new FunctionCall(CONCAT.toQualifiedName(), ImmutableList.of(new SymbolReference("varchar" + i), new StringLiteral("foo")))));
+                    builder.add(rowExpression(new Call(CONCAT, ImmutableList.of(new Reference(VARCHAR, "varchar" + i), new Constant(VARCHAR, Slices.utf8Slice("foo"))))));
                 }
             }
             return builder.build();
@@ -245,16 +242,11 @@ public class BenchmarkScanFilterAndProjectOperator
 
         private RowExpression rowExpression(Expression expression)
         {
-            TypeProvider typeProvider = TypeProvider.copyOf(symbolTypes);
             return SqlToRowExpressionTranslator.translate(
                     expression,
-                    new IrTypeAnalyzer(PLANNER_CONTEXT).getTypes(TEST_SESSION, typeProvider, expression),
                     sourceLayout,
                     PLANNER_CONTEXT.getMetadata(),
-                    PLANNER_CONTEXT.getFunctionManager(),
-                    PLANNER_CONTEXT.getTypeManager(),
-                    TEST_SESSION,
-                    true);
+                    PLANNER_CONTEXT.getTypeManager());
         }
 
         private static Page createPage(List<? extends Type> types, int positions, boolean dictionary)

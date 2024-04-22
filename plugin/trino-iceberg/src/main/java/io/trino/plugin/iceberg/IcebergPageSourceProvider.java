@@ -182,7 +182,6 @@ import static io.trino.plugin.iceberg.delete.PositionDeleteFilter.readPositionDe
 import static io.trino.plugin.iceberg.util.OrcIcebergIds.fileColumnsByIcebergId;
 import static io.trino.plugin.iceberg.util.OrcTypeConverter.ICEBERG_BINARY_TYPE;
 import static io.trino.plugin.iceberg.util.OrcTypeConverter.ORC_ICEBERG_ID_KEY;
-import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.block.PageBuilderStatus.DEFAULT_MAX_PAGE_SIZE_IN_BYTES;
 import static io.trino.spi.predicate.Utils.nativeValueToBlock;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -608,63 +607,58 @@ public class IcebergPageSourceProvider
             Optional<NameMapping> nameMapping,
             Map<Integer, Optional<String>> partitionKeys)
     {
-        switch (fileFormat) {
-            case ORC:
-                return createOrcPageSource(
-                        inputFile,
-                        start,
-                        length,
-                        partitionSpecId,
-                        partitionData,
-                        dataColumns,
-                        predicate,
-                        orcReaderOptions
-                                .withMaxMergeDistance(getOrcMaxMergeDistance(session))
-                                .withMaxBufferSize(getOrcMaxBufferSize(session))
-                                .withStreamBufferSize(getOrcStreamBufferSize(session))
-                                .withTinyStripeThreshold(getOrcTinyStripeThreshold(session))
-                                .withMaxReadBlockSize(getOrcMaxReadBlockSize(session))
-                                .withLazyReadSmallRanges(getOrcLazyReadSmallRanges(session))
-                                .withNestedLazy(isOrcNestedLazy(session))
-                                .withBloomFiltersEnabled(isOrcBloomFiltersEnabled(session)),
-                        fileFormatDataSourceStats,
-                        typeManager,
-                        nameMapping,
-                        partitionKeys);
-            case PARQUET:
-                return createParquetPageSource(
-                        inputFile,
-                        start,
-                        length,
-                        fileSize,
-                        partitionSpecId,
-                        partitionData,
-                        dataColumns,
-                        parquetReaderOptions
-                                .withMaxReadBlockSize(getParquetMaxReadBlockSize(session))
-                                .withMaxReadBlockRowCount(getParquetMaxReadBlockRowCount(session))
-                                .withSmallFileThreshold(getParquetSmallFileThreshold(session))
-                                .withIgnoreStatistics(isParquetIgnoreStatistics(session))
-                                .withBloomFilter(useParquetBloomFilter(session))
-                                // TODO https://github.com/trinodb/trino/issues/11000
-                                .withUseColumnIndex(false),
-                        predicate,
-                        fileFormatDataSourceStats,
-                        nameMapping,
-                        partitionKeys);
-            case AVRO:
-                return createAvroPageSource(
-                        inputFile,
-                        start,
-                        length,
-                        partitionSpecId,
-                        partitionData,
-                        fileSchema,
-                        nameMapping,
-                        dataColumns);
-            default:
-                throw new TrinoException(NOT_SUPPORTED, "File format not supported for Iceberg: " + fileFormat);
-        }
+        return switch (fileFormat) {
+            case ORC -> createOrcPageSource(
+                    inputFile,
+                    start,
+                    length,
+                    partitionSpecId,
+                    partitionData,
+                    dataColumns,
+                    predicate,
+                    orcReaderOptions
+                            .withMaxMergeDistance(getOrcMaxMergeDistance(session))
+                            .withMaxBufferSize(getOrcMaxBufferSize(session))
+                            .withStreamBufferSize(getOrcStreamBufferSize(session))
+                            .withTinyStripeThreshold(getOrcTinyStripeThreshold(session))
+                            .withMaxReadBlockSize(getOrcMaxReadBlockSize(session))
+                            .withLazyReadSmallRanges(getOrcLazyReadSmallRanges(session))
+                            .withNestedLazy(isOrcNestedLazy(session))
+                            .withBloomFiltersEnabled(isOrcBloomFiltersEnabled(session)),
+                    fileFormatDataSourceStats,
+                    typeManager,
+                    nameMapping,
+                    partitionKeys);
+            case PARQUET -> createParquetPageSource(
+                    inputFile,
+                    start,
+                    length,
+                    fileSize,
+                    partitionSpecId,
+                    partitionData,
+                    dataColumns,
+                    parquetReaderOptions
+                            .withMaxReadBlockSize(getParquetMaxReadBlockSize(session))
+                            .withMaxReadBlockRowCount(getParquetMaxReadBlockRowCount(session))
+                            .withSmallFileThreshold(getParquetSmallFileThreshold(session))
+                            .withIgnoreStatistics(isParquetIgnoreStatistics(session))
+                            .withBloomFilter(useParquetBloomFilter(session))
+                            // TODO https://github.com/trinodb/trino/issues/11000
+                            .withUseColumnIndex(false),
+                    predicate,
+                    fileFormatDataSourceStats,
+                    nameMapping,
+                    partitionKeys);
+            case AVRO -> createAvroPageSource(
+                    inputFile,
+                    start,
+                    length,
+                    partitionSpecId,
+                    partitionData,
+                    fileSchema,
+                    nameMapping,
+                    dataColumns);
+        };
     }
 
     private static ConnectorPageSource generatePages(
@@ -1035,8 +1029,8 @@ public class IcebergPageSourceProvider
             Optional<Long> startRowPosition = Optional.empty();
             Optional<Long> endRowPosition = Optional.empty();
             if (!rowGroups.isEmpty()) {
-                startRowPosition = Optional.of(rowGroups.get(0).fileRowOffset());
-                RowGroupInfo lastRowGroup = rowGroups.get(rowGroups.size() - 1);
+                startRowPosition = Optional.of(rowGroups.getFirst().fileRowOffset());
+                RowGroupInfo lastRowGroup = rowGroups.getLast();
                 endRowPosition = Optional.of(lastRowGroup.fileRowOffset() + lastRowGroup.blockMetaData().getRowCount());
             }
 
@@ -1489,7 +1483,7 @@ public class IcebergPageSourceProvider
         }
 
         // Construct a stripped version of the original column type containing only the selected field and the hierarchy of its parents
-        org.apache.parquet.schema.Type type = subfieldTypes.get(subfieldTypes.size() - 1);
+        org.apache.parquet.schema.Type type = subfieldTypes.getLast();
         for (int i = subfieldTypes.size() - 2; i >= 0; --i) {
             GroupType groupType = subfieldTypes.get(i).asGroupType();
             type = new GroupType(groupType.getRepetition(), groupType.getName(), ImmutableList.of(type));

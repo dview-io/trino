@@ -14,7 +14,6 @@
 package io.trino.sql;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Strings;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import io.trino.sql.tree.AddColumn;
 import io.trino.sql.tree.AliasedRelation;
@@ -335,7 +334,7 @@ public final class SqlFormatter
                 process(columns.get(i), indent + 1);
                 builder.append(",\n");
             }
-            process(columns.get(columns.size() - 1), indent + 1);
+            process(columns.getLast(), indent + 1);
             builder.append(")");
         }
 
@@ -445,7 +444,7 @@ public final class SqlFormatter
                         .append(" ");
             }
             builder.append("(");
-            process(node.getSiblings().get(node.getSiblings().size() - 1));
+            process(node.getSiblings().getLast());
             builder.append(")");
             return null;
         }
@@ -1163,6 +1162,8 @@ public final class SqlFormatter
             node.getSecurity().ifPresent(security -> builder
                     .append(" SECURITY ")
                     .append(security.name()));
+
+            builder.append(formatPropertiesMultiLine(node.getProperties()));
 
             builder.append(" AS\n");
 
@@ -2595,7 +2596,7 @@ public final class SqlFormatter
 
         private static String indentString(int indent)
         {
-            return Strings.repeat(INDENT, indent);
+            return INDENT.repeat(indent);
         }
 
         private void formatDefinitionList(List<String> elements, int indent)
@@ -2611,7 +2612,7 @@ public final class SqlFormatter
                     append(indent, elements.get(i))
                             .append(",\n");
                 }
-                append(indent, elements.get(elements.size() - 1))
+                append(indent, elements.getLast())
                         .append("\n");
             }
         }

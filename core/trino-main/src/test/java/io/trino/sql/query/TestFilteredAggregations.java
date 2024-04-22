@@ -15,24 +15,25 @@ package io.trino.sql.query;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import io.trino.sql.ir.Comparison;
+import io.trino.sql.ir.Constant;
+import io.trino.sql.ir.Logical;
+import io.trino.sql.ir.Reference;
 import io.trino.sql.planner.assertions.BasePlanTest;
 import io.trino.sql.planner.assertions.PlanMatchPattern;
 import io.trino.sql.planner.plan.FilterNode;
-import io.trino.sql.tree.ComparisonExpression;
-import io.trino.sql.tree.DoubleLiteral;
-import io.trino.sql.tree.GenericLiteral;
-import io.trino.sql.tree.LogicalExpression;
-import io.trino.sql.tree.SymbolReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
+import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.DoubleType.DOUBLE;
+import static io.trino.sql.ir.Comparison.Operator.GREATER_THAN;
+import static io.trino.sql.ir.Logical.Operator.OR;
 import static io.trino.sql.planner.LogicalPlanner.Stage.OPTIMIZED;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.filter;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static io.trino.sql.planner.optimizations.PlanNodeSearcher.searchFrom;
-import static io.trino.sql.tree.ComparisonExpression.Operator.GREATER_THAN;
-import static io.trino.sql.tree.LogicalExpression.Operator.OR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestFilteredAggregations
@@ -125,7 +126,7 @@ public class TestFilteredAggregations
                 "SELECT sum(totalprice) FILTER(WHERE totalprice > 0), sum(custkey) FILTER(WHERE custkey > 0) FROM orders",
                 anyTree(
                         filter(
-                                new LogicalExpression(OR, ImmutableList.of(new ComparisonExpression(GREATER_THAN, new SymbolReference("totalprice"), new DoubleLiteral("0.0")), new ComparisonExpression(GREATER_THAN, new SymbolReference("custkey"), new GenericLiteral("BIGINT", "0")))),
+                                new Logical(OR, ImmutableList.of(new Comparison(GREATER_THAN, new Reference(DOUBLE, "totalprice"), new Constant(DOUBLE, 0.0)), new Comparison(GREATER_THAN, new Reference(BIGINT, "custkey"), new Constant(BIGINT, 0L)))),
                                 source)));
     }
 
