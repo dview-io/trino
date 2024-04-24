@@ -14,6 +14,7 @@
 package io.trino.plugin.dview.split;
 
 import com.google.inject.Inject;
+import io.airlift.log.Logger;
 import io.dview.schema.fortress.models.schema.file.Segment;
 import io.trino.plugin.dview.client.DviewClient;
 import io.trino.plugin.dview.table.DviewTableHandle;
@@ -37,6 +38,7 @@ public class DviewSplitManager
 {
     private final DviewClient client;
     private final NodeManager nodeManager;
+    private static final Logger log = Logger.get(DviewSplitManager.class);
 
     @Inject
     public DviewSplitManager(DviewClient client, NodeManager nodeManager)
@@ -56,11 +58,14 @@ public class DviewSplitManager
         DviewTableHandle dviewTableHandle = (DviewTableHandle) connectorTableHandle;
         List<HostAddress> addresses = nodeManager.getRequiredWorkerNodes().stream().map(Node::getHostAndPort).toList();
         List<Segment> segments = client.getDocumentContract().getSegments(dviewTableHandle.getEntity());
+        log.info("Get segment %s for table %s", segments, dviewTableHandle.getEntity());
         List<DviewSplit> splits = segments.stream()
                 .flatMap((segment -> segment.getDocuments().stream().map(document ->
                         new DviewSplit(addresses, document.getPath(), segment.getDateValue().toString(), segment.getTimeValue() != null ? segment.getTimeValue().toString() : null)
                 ).toList().stream()))
                 .collect(Collectors.toList());
+        log.error("dviewTableHandle: " + dviewTableHandle);
+        log.error("Split Size: " + splits.size());
         return new FixedSplitSource(splits);
     }
 }
