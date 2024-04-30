@@ -1,6 +1,6 @@
 {{- if gt (int .Values.server.workers) 0 }}
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ template "trino.worker" . }}
   labels:
@@ -48,6 +48,9 @@ spec:
       shareProcessNamespace: {{ .Values.shareProcessNamespace.worker }}
       {{- end }}
       volumes:
+#        - name: trino-etc-volume
+#          persistentVolumeClaim:
+#              claimName: trino-etc
         - name: config-volume
           configMap:
             name: {{ template "trino.worker" . }}
@@ -67,6 +70,12 @@ spec:
           secret:
             secretName: {{ .secretName }}
         {{- end }}
+        - name: trino-ranger-config
+          configMap:
+            name: trino-ranger-config
+            items:
+             - key: install.properties
+               path: install.properties
       {{- if .Values.initContainers.worker }}
       initContainers:
       {{- tpl (toYaml .Values.initContainers.worker) . | nindent 6 }}
@@ -74,20 +83,65 @@ spec:
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       containers:
+        - image: k8s.gcr.io/git-sync/git-sync:v3.2.2
+          imagePullPolicy: IfNotPresent
+          name: git-sync
+          resources: { }
+          securityContext:
+            runAsUser: 0
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          env:
+            - name: GIT_SYNC_REPO
+              valueFrom:
+                secretKeyRef:
+                    key: GIT_DP_FLOW_URL
+                    name: fiber
+            - name: GIT_SYNC_BRANCH
+              value: master
+            - name: GIT_SYNC_ROOT
+              value: /mnt/data
+            - name: GIT_SYNC_DEST
+              value: repo
+            - name: GIT_SYNC_ONE_TIME
+              value: "false"
+            - name: GIT_SYNC_REV
+              value: HEAD
+            - name: GIT_SYNC_DEPTH
+              value: "1"
+            - name: GIT_SYNC_WAIT
+              value: "60"
+            - name: GIT_SYNC_TIMEOUT
+              value: "120"
+            - name: GIT_SYNC_ADD_USER
+              value: "true"
+            - name: GIT_SYNC_MAX_SYNC_FAILURES
+              value: "0"
+            - name: GIT_KNOWN_HOSTS
+              value: "false"
+            - name: CONNECTION_CHECK_MAX_COUNT
+              value: "0"
+            - name: GIT_SYNC_USERNAME
+              valueFrom:
+                secretKeyRef:
+                    key: git_user
+                    name: fiber
+            - name: GIT_SYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                    key: git_pwd
+                    name: fiber
         - name: {{ .Chart.Name }}-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [ "/bin/bash", "-c" ]
-          args:
-              - "chmod -R 777 /etc/trino && /root/ranger-trino-plugin/enable-trino-plugin.sh && /usr/lib/trino/bin/run-trino"
           env:
             {{- toYaml .Values.env | nindent 12 }}
           envFrom:
             {{- toYaml .Values.envFrom | nindent 12 }}
           volumeMounts:
-            - mountPath: {{ .Values.server.config.path }}
+            - mountPath: {{ .Values.server.config.mountPath }}
               name: config-volume
-            - mountPath: {{ .Values.server.config.path }}/catalog
+            - mountPath: {{ .Values.server.config.mountPath }}/catalog
               name: catalog-volume
             - mountPath: {{ .Values.kafka.mountPath }}
               name: schemas-volume
@@ -99,8 +153,6 @@ spec:
             - name: {{ .name }}
               mountPath: {{ .path }}
             {{- end }}
-            - name: trino-pvc
-              mountPath: /
             {{- with .Values.volumeMounts }}
                 {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -113,24 +165,6 @@ spec:
               containerPort: {{ $value.port }}
               protocol: {{ $value.protocol }}
           {{- end }}
-          livenessProbe:
-            httpGet:
-              path: /v1/info
-              port: http
-            initialDelaySeconds: {{ .Values.worker.livenessProbe.initialDelaySeconds | default 20 }}
-            periodSeconds: {{ .Values.worker.livenessProbe.periodSeconds | default 10 }}
-            timeoutSeconds: {{ .Values.worker.livenessProbe.timeoutSeconds | default 5 }}
-            failureThreshold: {{ .Values.worker.livenessProbe.failureThreshold | default 6 }}
-            successThreshold: {{ .Values.worker.livenessProbe.successThreshold | default 1 }}
-          readinessProbe:
-            httpGet:
-              path: /v1/info
-              port: http
-            initialDelaySeconds: {{ .Values.worker.readinessProbe.initialDelaySeconds | default 20 }}
-            periodSeconds: {{ .Values.worker.readinessProbe.periodSeconds | default 10 }}
-            timeoutSeconds: {{ .Values.worker.readinessProbe.timeoutSeconds | default 5 }}
-            failureThreshold: {{ .Values.worker.readinessProbe.failureThreshold | default 6 }}
-            successThreshold: {{ .Values.worker.readinessProbe.successThreshold | default 1 }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
       {{- if .Values.sidecarContainers.worker }}
@@ -148,13 +182,4 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  volumeClaimTemplates:
-  - metadata:
-        name: trino-pvc
-    spec:
-        accessModes: [ "ReadWriteOnce" ]
-        storageClassName: gp2
-        resources:
-            requests:
-                storage: 20Gi
 {{- end }}
