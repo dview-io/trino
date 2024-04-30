@@ -33,6 +33,9 @@ public class DviewConfig
     private String tenant;
     private String namespace;
     private String org;
+    String accessKey;
+    String secretKey;
+    String region;
 
     @NotNull
     public String getMysqlUrl()
@@ -80,6 +83,22 @@ public class DviewConfig
     public String getTenant()
     {
         return tenant;
+    }
+
+    @NotNull
+    public String getAccessKey()
+    { return accessKey; }
+
+    @NotNull
+    public String getRegion()
+    {
+        return region;
+    }
+
+    @NotNull
+    public String getSecretKey()
+    {
+        return secretKey;
     }
 
     @Config("mysql.url")
@@ -138,6 +157,27 @@ public class DviewConfig
         return this;
     }
 
+    @Config("s3.accessKey")
+    public DviewConfig setAccessKey(String accessKey)
+    {
+        this.accessKey = accessKey;
+        return this;
+    }
+
+    @Config("s3.secretKey")
+    public DviewConfig setSecretKey(String secretKey)
+    {
+        this.secretKey = secretKey;
+        return this;
+    }
+
+    @Config("s3.region")
+    public DviewConfig setRegion(String region)
+    {
+        this.region = region;
+        return this;
+    }
+
     public FortressClientConfig getFortressClientConfig()
     {
         return FortressClientConfig.builder()
@@ -147,6 +187,9 @@ public class DviewConfig
                 .mysqlPassword(getMysqlPassword())
                 .connectionTimeout(getConnectionTimeout())
                 .mysqlAdditionalProperties(null)
+                .accessKey(getAccessKey())
+                .secretKey(getSecretKey())
+                .region(getRegion())
                 .build();
     }
 }
