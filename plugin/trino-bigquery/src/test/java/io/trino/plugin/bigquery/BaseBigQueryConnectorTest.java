@@ -48,6 +48,7 @@ import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.testing.MaterializedResult.resultBuilder;
 import static io.trino.testing.MultisetAssertions.assertMultisetsEqual;
 import static io.trino.testing.TestingNames.randomNameSuffix;
+import static io.trino.testing.TestingProperties.requiredNonEmptySystemProperty;
 import static io.trino.testing.assertions.Assert.assertEventually;
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MINUTES;
@@ -70,7 +71,7 @@ public abstract class BaseBigQueryConnectorTest
     {
         this.bigQuerySqlExecutor = new BigQuerySqlExecutor();
         // Prerequisite: upload region.csv in resources directory to gs://{testing.gcp-storage-bucket}/tpch/tiny/region.csv
-        this.gcpStorageBucket = System.getProperty("testing.gcp-storage-bucket");
+        this.gcpStorageBucket = requiredNonEmptySystemProperty("testing.gcp-storage-bucket");
     }
 
     @Override
@@ -341,6 +342,40 @@ public abstract class BaseBigQueryConnectorTest
     protected boolean isColumnNameRejected(Exception exception, String columnName, boolean delimited)
     {
         return nullToEmpty(exception.getMessage()).matches(".*Invalid field name \"%s\". Fields must contain the allowed characters, and be at most 300 characters long..*".formatted(columnName.replace("\\", "\\\\")));
+    }
+
+    @Test // TODO: Move this test to BaseConnectorTest
+    public void testStreamCommentTableSpecialCharacter()
+    {
+        String schemaName = "test_comment" + randomNameSuffix();
+        assertUpdate("CREATE SCHEMA " + schemaName);
+        try {
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_semicolon (a integer) COMMENT " + varcharLiteral("a;semicolon"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_at (a integer) COMMENT " + varcharLiteral("an@at"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_quote (a integer) COMMENT " + varcharLiteral("a\"quote"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_apostrophe (a integer) COMMENT " + varcharLiteral("an'apostrophe"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_backtick (a integer) COMMENT " + varcharLiteral("a`backtick`"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_slash (a integer) COMMENT " + varcharLiteral("a/slash"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_backslash (a integer) COMMENT " + varcharLiteral("a\\backslash"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_question (a integer) COMMENT " + varcharLiteral("a?question"));
+            assertUpdate("CREATE TABLE " + schemaName + ".test_comment_bracket (a integer) COMMENT " + varcharLiteral("[square bracket]"));
+
+            assertQuery(
+                    "SELECT table_name, comment FROM system.metadata.table_comments WHERE catalog_name = 'bigquery' AND schema_name = '" + schemaName + "'",
+                    "VALUES " +
+                            "('test_comment_semicolon', " + varcharLiteral("a;semicolon") + ")," +
+                            "('test_comment_at', " + varcharLiteral("an@at") + ")," +
+                            "('test_comment_quote', " + varcharLiteral("a\"quote") + ")," +
+                            "('test_comment_apostrophe', " + varcharLiteral("an'apostrophe") + ")," +
+                            "('test_comment_backtick', " + varcharLiteral("a`backtick`") + ")," +
+                            "('test_comment_slash', " + varcharLiteral("a/slash") + ")," +
+                            "('test_comment_backslash', " + varcharLiteral("a\\backslash") + ")," +
+                            "('test_comment_question', " + varcharLiteral("a?question") + ")," +
+                            "('test_comment_bracket', " + varcharLiteral("[square bracket]") + ")");
+        }
+        finally {
+            assertUpdate("DROP SCHEMA " + schemaName + " CASCADE");
+        }
     }
 
     @Test
