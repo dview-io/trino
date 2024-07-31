@@ -1,9 +1,9 @@
-#mvn clean package -DskipTests
-#
-#if [ $? -ne 0 ]; then
-#    echo "mvn build failed"
-#    exit 1
-#fi
+mvn clean package -DskipTests
+
+if [ $? -ne 0 ]; then
+    echo "mvn build failed"
+    exit 1
+fi
 
 docker stop trino
 docker rm trino
