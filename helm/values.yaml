@@ -3,17 +3,16 @@
 # Declare variables to be passed into your templates.
 
 image:
-  repository: dview/trino
+  repository: dview/trino-dev
   pullPolicy: Always
   # Overrides the image tag whose default is the chart version.
   # Same value as Chart.yaml#appVersion
-  tag: 433
+  tag: 435
 
-imagePullSecrets:
-  - name: registry-credentials
+imagePullSecrets: []
 
 server:
-  workers: 2
+  workers: 1
   node:
     environment: production
     dataDir: /data/trino
@@ -23,6 +22,7 @@ server:
       level: INFO
   config:
     path: /etc/trino
+    mountPath: /mnt/etc/trino
     http:
       port: 8080
     https:
@@ -109,7 +109,19 @@ eventListenerProperties: {}
 additionalCatalogs: {}
 
 # Array of EnvVar (https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#envvar-v1-core)
-env: []
+env:
+  - name: TRINO_MOUNT_CONFIG_PATH
+    value: /mnt/etc/trino
+  - name: TRINO_CONFIG_PATH
+    value: /etc/
+  - name: AWS_ACCESS_KEY
+    value:
+  - name: accessKey
+    value:
+  - name: secretKey
+    value:
+  - name: AWS_SECRET_KEY
+    value:
 
 # Array of EnvFromSource (https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#envfromsource-v1-core)
 envFrom: []
@@ -293,7 +305,7 @@ worker:
     #   path: /secrets/sample.json
 
 kafka:
-  mountPath: "/etc/trino/schemas"
+  mountPath: "/mnt/etc/trino/schemas"
   tableDescriptions: {}
     # Custom kafka table descriptions that will be mounted in mountPath
     # testschema.json: |-
@@ -348,4 +360,3 @@ ranger:
     repository_name: trino_sandbox
     elasticsearch:
         enabled: false
-

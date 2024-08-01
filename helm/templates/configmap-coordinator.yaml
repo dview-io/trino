@@ -82,7 +82,7 @@ data:
     exchange-manager.name={{ .Values.server.exchangeManager.name }}
   {{ if eq .Values.server.exchangeManager.name "filesystem" }}
     exchange.base-directories={{ .Values.server.exchangeManager.baseDir }}
-  {{- end }}  
+  {{- end }}
   {{- range $configValue := .Values.additionalExchangeManagerProperties }}
     {{ $configValue }}
   {{- end }}
@@ -125,7 +125,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: trino-access-control-volume-coordinator
+  name: {{ .Release.Name }}-trino-access-control-volume-coordinator
   labels:
     {{- include "trino.labels" . | nindent 4 }}
     app.kubernetes.io/component: coordinator
@@ -140,7 +140,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: schemas-volume-coordinator
+  name: {{ .Release.Name }}-schemas-volume-coordinator
   labels:
     {{- include "trino.labels" . | nindent 4 }}
     app.kubernetes.io/component: coordinator

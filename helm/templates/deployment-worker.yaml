@@ -56,7 +56,7 @@ spec:
             name: {{ template "trino.catalog" . }}
         - name: schemas-volume
           configMap:
-            name: schemas-volume-worker
+            name: {{ .Release.Name }}-schemas-volume-worker
         {{- range .Values.secretMounts }}
         - name: {{ .name }}
           secret:
@@ -77,9 +77,9 @@ spec:
         - name: {{ .Chart.Name }}-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [ "/bin/bash", "-c" ]
-          args:
-              - "chmod -R 777 /etc/trino && /root/ranger-trino-plugin/enable-trino-plugin.sh && /usr/lib/trino/bin/run-trino"
+#          command: [ "/bin/bash", "-c" ]
+#          args:
+#              - "/usr/lib/trino/bin/run-trino"
           env:
             {{- toYaml .Values.env | nindent 12 }}
           envFrom:
@@ -99,8 +99,8 @@ spec:
             - name: {{ .name }}
               mountPath: {{ .path }}
             {{- end }}
-            - name: trino-pvc
-              mountPath: /
+#            - name: trino-pvc
+#              mountPath: /
             {{- with .Values.volumeMounts }}
                 {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -148,13 +148,13 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  volumeClaimTemplates:
-  - metadata:
-        name: trino-pvc
-    spec:
-        accessModes: [ "ReadWriteOnce" ]
-        storageClassName: gp2
-        resources:
-            requests:
-                storage: 20Gi
+#  volumeClaimTemplates:
+#  - metadata:
+#        name: trino-pvc
+#    spec:
+#        accessModes: [ "ReadWriteOnce" ]
+#        storageClassName: gp2
+#        resources:
+#            requests:
+#                storage: 20Gi
 {{- end }}

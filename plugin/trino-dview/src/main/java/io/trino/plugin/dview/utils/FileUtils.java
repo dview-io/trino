@@ -26,7 +26,6 @@ public class FileUtils
 
     public static ConfigurationInitializer getConfigurationInitializerForCloudProvider(String storagePath, CloudProvider cloudProvider)
     {
-        System.out.println(cloudProvider);
         switch (cloudProvider.getName()) {
             case S3:
                 HiveS3Config hiveS3Config = new HiveS3Config();

@@ -34,36 +34,17 @@ public class AttributeUtils
 
     public static Type convertFortressTypeToTrinoType(AttributeType.Type type)
     {
-        switch (type) {
-            case BOOLEAN:
-            case TINYINT:
-                return BooleanType.BOOLEAN;
-            case SMALLINT:
-            case INT:
-                return IntegerType.INTEGER;
-            case BIGINT:
-                return BigintType.BIGINT;
-            case FLOAT:
-            case DOUBLE:
-            case DECIMAL:
-                return DoubleType.DOUBLE;
-            case DATE:
-                return DateType.DATE;
-            case DATETIME:
-            case TIMESTAMP:
-                return TimestampType.TIMESTAMP_MILLIS;
-            case TIME:
-                return TimeType.TIME_MILLIS;
-            case CHAR:
-                return CharType.createCharType(1);
-            case JSON:
-            case BINARY:
-            case BLOB:
-                return VarbinaryType.VARBINARY;
-            case TEXT:
-            case VARCHAR:
-            default:
-                return VarcharType.VARCHAR;
-        }
+        return switch (type) {
+            case BOOLEAN, TINYINT -> BooleanType.BOOLEAN;
+            case SMALLINT, INT -> IntegerType.INTEGER;
+            case BIGINT -> BigintType.BIGINT;
+            case FLOAT, DOUBLE, DECIMAL -> DoubleType.DOUBLE;
+            case DATE -> DateType.DATE;
+            case DATETIME, TIMESTAMP -> TimestampType.TIMESTAMP_MILLIS;
+            case TIME -> TimeType.TIME_MILLIS;
+            case CHAR -> CharType.createCharType(1);
+            case JSON, BINARY, BLOB -> VarbinaryType.VARBINARY;
+            default -> VarcharType.VARCHAR;
+        };
     }
 }

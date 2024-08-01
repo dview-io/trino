@@ -23,6 +23,7 @@ import io.trino.plugin.dview.utils.AttributeUtils;
 import io.trino.spi.connector.ColumnMetadata;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -37,14 +38,13 @@ public class DviewTable
     private final Entity entity;
     private final long entityId;
     private final EntitySchema entitySchema;
+    private final Map<String, Object> properties;
 
     @JsonCreator
-    public DviewTable(@JsonProperty("entity") Entity entity, @JsonProperty("entitySchema") EntitySchema entitySchema)
+    public DviewTable(@JsonProperty("entity") Entity entity, @JsonProperty("entitySchema") EntitySchema entitySchema, @JsonProperty("properties") Map<String, Object> properties)
     {
         checkArgument(!isNullOrEmpty(entity.getName()), "name is null or is empty");
         this.name = requireNonNull(entity.getName(), "name is null");
-        System.out.println(entitySchema);
-        System.out.println(entity);
         this.columns = entitySchema.getAttributes().stream()
                 .map((attribute ->
                         new DviewColumn(attribute.getName(),
@@ -60,6 +60,7 @@ public class DviewTable
         this.entity = entity;
         this.entitySchema = entitySchema;
         this.entityId = entity.getId();
+        this.properties = properties;
     }
 
     @JsonProperty
@@ -96,5 +97,11 @@ public class DviewTable
     public EntitySchema getEntitySchema()
     {
         return entitySchema;
+    }
+
+    @JsonProperty
+    public Map<String, Object> getProperties()
+    {
+        return properties;
     }
 }

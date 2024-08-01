@@ -16,15 +16,21 @@ package io.trino.plugin.dview.connector;
 import com.google.inject.Inject;
 import io.airlift.bootstrap.LifeCycleManager;
 import io.trino.plugin.dview.DviewTransactionHandle;
+import io.trino.plugin.dview.page.DviewPageSinkProvider;
 import io.trino.plugin.dview.page.DviewPageSourceProvider;
 import io.trino.plugin.dview.split.DviewSplitManager;
+import io.trino.plugin.dview.utils.DviewTableProperties;
 import io.trino.spi.connector.Connector;
 import io.trino.spi.connector.ConnectorMetadata;
+import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorPageSourceProvider;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorSplitManager;
 import io.trino.spi.connector.ConnectorTransactionHandle;
+import io.trino.spi.session.PropertyMetadata;
 import io.trino.spi.transaction.IsolationLevel;
+
+import java.util.List;
 
 import static java.util.Objects.requireNonNull;
 
@@ -35,14 +41,18 @@ public class DviewConnector
     private final DviewConnectorMetadata metadata;
     private final DviewPageSourceProvider dviewPageSourceProvider;
     private final DviewSplitManager dviewSplitManager;
+    private final DviewTableProperties dviewTableProperties;
+    private final DviewPageSinkProvider dviewPageSinkProvider;
 
     @Inject
-    public DviewConnector(LifeCycleManager lifeCycleManager, DviewConnectorMetadata metadata, DviewSplitManager dviewSplitManager, DviewPageSourceProvider dviewPageSourceProvider)
+    public DviewConnector(LifeCycleManager lifeCycleManager, DviewConnectorMetadata metadata, DviewSplitManager dviewSplitManager, DviewPageSourceProvider dviewPageSourceProvider, DviewTableProperties dviewTableProperties, DviewPageSinkProvider dviewPageSinkProvider)
     {
         this.lifeCycleManager = requireNonNull(lifeCycleManager, "lifeCycleManager is null");
         this.metadata = requireNonNull(metadata, "DviewConnectorMetadata is null");
         this.dviewSplitManager = requireNonNull(dviewSplitManager, "dviewSplitManager is null");
         this.dviewPageSourceProvider = requireNonNull(dviewPageSourceProvider, "dviewPageSourceProvider is null");
+        this.dviewTableProperties = requireNonNull(dviewTableProperties, "dviewTableProperties is null");
+        this.dviewPageSinkProvider = requireNonNull(dviewPageSinkProvider, "dviewPageSinkProvider is null");
     }
 
     @Override
@@ -73,5 +83,17 @@ public class DviewConnector
     public final void shutdown()
     {
         lifeCycleManager.stop();
+    }
+
+    @Override
+    public List<PropertyMetadata<?>> getTableProperties()
+    {
+        return dviewTableProperties.getTableProperties();
+    }
+
+    @Override
+    public ConnectorPageSinkProvider getPageSinkProvider()
+    {
+        return this.dviewPageSinkProvider;
     }
 }

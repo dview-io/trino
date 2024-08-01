@@ -43,6 +43,7 @@ import io.trino.parquet.predicate.TupleDomainParquetPredicate;
 import io.trino.parquet.reader.MetadataReader;
 import io.trino.parquet.reader.ParquetReader;
 import io.trino.parquet.reader.TrinoColumnIndexStore;
+import io.trino.plugin.dview.DviewConfig;
 import io.trino.plugin.dview.client.DviewClient;
 import io.trino.plugin.dview.split.DviewSplit;
 import io.trino.plugin.dview.table.DviewTableHandle;
@@ -133,13 +134,15 @@ public class DviewPageSourceProvider
     private final ParquetReaderOptions parquetReaderOptions;
     private final TypeManager typeManager;
     private TrinoFileSystem fileSystem;
+    private final DviewConfig dviewConfig;
     private static final Logger log = Logger.get(DviewPageSourceProvider.class);
 
     @Inject
-    public DviewPageSourceProvider(DviewClient dviewClient, FileFormatDataSourceStats fileFormatDataSourceStats, TypeManager typeManager)
+    public DviewPageSourceProvider(DviewClient dviewClient, FileFormatDataSourceStats fileFormatDataSourceStats, TypeManager typeManager, DviewConfig dviewConfig)
     {
         this.dviewClient = dviewClient;
         this.fileFormatDataSourceStats = fileFormatDataSourceStats;
+        this.dviewConfig = dviewConfig;
         this.orcReaderOptions = new OrcReaderOptions();
         this.parquetReaderOptions = new ParquetReaderOptions();
         this.typeManager = typeManager;
@@ -148,6 +151,7 @@ public class DviewPageSourceProvider
     @Override
     public ConnectorPageSource createPageSource(ConnectorTransactionHandle transaction, ConnectorSession session, ConnectorSplit split, ConnectorTableHandle table, List<ColumnHandle> columns, DynamicFilter dynamicFilter)
     {
+        log.info("Entering into DviewPageSourceProvider::createPageSource");
         DviewSplit dviewSplit = (DviewSplit) split;
         DviewTableHandle dviewTableHandle = (DviewTableHandle) table;
         List<DviewColumnHandle> columnHandles = columns.stream().map(DviewColumnHandle.class::cast).toList();
@@ -195,12 +199,13 @@ public class DviewPageSourceProvider
     private ConnectorPageSource createParquetDataSource(String filePath, List<DviewColumnHandle> columnHandles, boolean useColumnNames, TupleDomain<DviewColumnHandle> effectivePredicate, Date partitionDate, Time partitionTime)
             throws InterruptedException, IOException
     {
+        log.info("Entering into DviewPageSourceProvider::createParquetDataSource");
         int retryCount = 1;
         int sleepIntervalMs = 2000;
         Throwable lastErrorEncountered = null;
         while (retryCount++ <= 3) {
             TrinoInputFile inputFile = fileSystem.newInputFile(Location.of(filePath));
-            log.error("reading inputFile: " + inputFile.location());
+            log.info("reading inputFile: " + inputFile.location());
             try {
                 ParquetDataSource dataSource = new TrinoParquetDataSource(inputFile, parquetReaderOptions, fileFormatDataSourceStats);
                 DateTimeZone dateTimeZone = UTC;
@@ -278,13 +283,12 @@ public class DviewPageSourceProvider
                             PARQUET_ROW_INDEX_COLUMN.getColumnName())) {
                         pageSourceBuilder.addRowIndexColumn();
                     }
-                    else if (column.getColumnName().equals("dt") && partitionDate != null) {
-                        System.out.println("type : " + column.getColumnType());
+                    else if (column.getColumnName().equals(dviewConfig.getPartitionFirst()) && partitionDate != null) {
                         pageSourceBuilder.addConstantColumn(
                                 nativeValueToBlock(column.getColumnType(),
                                         partitionDate.getTime() / 86400000));
                     }
-                    else if (column.getColumnName().equals("hour") && partitionTime != null) {
+                    else if (column.getColumnName().equals(dviewConfig.getPartitionSecond()) && partitionTime != null) {
                         pageSourceBuilder.addConstantColumn(
                                 nativeValueToBlock(column.getColumnType(),
                                         partitionTime.getTime()));
@@ -351,6 +355,7 @@ public class DviewPageSourceProvider
 
     private static TupleDomain<ColumnDescriptor> getParquetTupleDomain(Map<List<String>, ColumnDescriptor> descriptorsByPath, TupleDomain<DviewColumnHandle> effectivePredicate, MessageType fileSchema, boolean useColumnNames)
     {
+        log.info("Entering into DviewPageSourceProvider::getParquetTupleDomain");
         if (effectivePredicate.isNone()) {
             return TupleDomain.none();
         }

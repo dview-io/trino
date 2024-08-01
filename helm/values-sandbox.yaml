@@ -1,19 +1,19 @@
 serviceAccount:
     create: true
 additionalCatalogs:
-    test: |
+    test.properties: |
         connector.name= dview
-        mysql.url=jdbc:mysql://dview-integ-test.cjab8ksmggyx.ap-south-1.rds.amazonaws.com:3306/fortress?useSSL=false
+        mysql.url=jdbc:mysql:///fortress?useSSL=false
         mysql.username=data
         mysql.password=
         client.type=EMBEDDED
         connection.timeout= 3600
-        dview.org=io.dview
+        dview.org=dview
         dview.tenant=analytics
         dview.namespace=default
         s3.accessKey=
         s3.secretKey=
-        s3.region=
+        s3.region=ap-south-1
 ranger:
     policy_manager_url: http://ranger-admin:6080
     repository_name: trino_sandbox

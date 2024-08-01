@@ -54,7 +54,7 @@ spec:
             name: {{ template "trino.catalog" . }}
         - name: schemas-volume
           configMap:
-            name: schemas-volume-coordinator
+            name: {{ .Release.Name }}-schemas-volume-coordinator
         {{- if .Values.accessControl }}{{- if eq .Values.accessControl.type "configmap" }}
         - name: access-control-volume
           configMap:
@@ -94,7 +94,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: [ "/bin/bash", "-c" ]
           args:
-              - "/root/ranger-trino-plugin/enable-trino-plugin.sh && /usr/lib/trino/bin/run-trino"
+              - "/usr/lib/trino/bin/run-trino"
           env:
             {{- toYaml .Values.env | nindent 12 }}
           envFrom:

@@ -36,6 +36,8 @@ public class DviewConfig
     String accessKey;
     String secretKey;
     String region;
+    String partitionFirst;
+    String partitionSecond;
 
     @NotNull
     public String getMysqlUrl()
@@ -99,6 +101,18 @@ public class DviewConfig
     public String getSecretKey()
     {
         return secretKey;
+    }
+
+    @NotNull
+    public String getPartitionFirst()
+    {
+        return partitionFirst;
+    }
+
+    @NotNull
+    public String getPartitionSecond()
+    {
+        return partitionSecond;
     }
 
     @Config("mysql.url")
@@ -175,6 +189,20 @@ public class DviewConfig
     public DviewConfig setRegion(String region)
     {
         this.region = region;
+        return this;
+    }
+
+    @Config("partition-first")
+    public DviewConfig setPartitionFirst(String partitionFirst)
+    {
+        this.partitionFirst = partitionFirst;
+        return this;
+    }
+
+    @Config("partition-second")
+    public DviewConfig setPartitionSecond(String partitionSecond)
+    {
+        this.partitionSecond = partitionSecond;
         return this;
     }
 

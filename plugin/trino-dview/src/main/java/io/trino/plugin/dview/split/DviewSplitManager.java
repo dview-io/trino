@@ -55,6 +55,7 @@ public class DviewSplitManager
             DynamicFilter dynamicFilter,
             Constraint constraint)
     {
+        log.info("Entering into DviewSplitManager::DviewSplitManager");
         DviewTableHandle dviewTableHandle = (DviewTableHandle) connectorTableHandle;
         List<HostAddress> addresses = nodeManager.getRequiredWorkerNodes().stream().map(Node::getHostAndPort).toList();
         List<Segment> segments = client.getDocumentContract().getSegments(dviewTableHandle.getEntity());
