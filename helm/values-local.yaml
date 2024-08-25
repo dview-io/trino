@@ -1,0 +1,43 @@
+image:
+    repository: dview/trino-dev
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart version.
+    # Same value as Chart.yaml#appVersion
+    tag: 444
+
+worker:
+    jvm:
+        maxHeapSize: "1G"
+
+    resources:
+        cpu: 500m
+        memory: 1G
+
+server:
+    workers: 1
+    config:
+        query:
+            maxMemory: "512MB"
+
+coordinator:
+    jvm:
+        maxHeapSize: "1G"
+    config:
+        memory:
+            heapHeadroomPerNode: ""
+        query:
+            maxMemoryPerNode: "512MB"
+    resources:
+        cpu: 500m
+        memory: 1G
+ranger:
+    enabled: true
+    policy_manager_url: http://ranger-admin:6080
+    repository_name: aqua
+    elasticsearch:
+        enabled: false
+
+vs:
+    enabled: false
+git_sync:
+    enabled: false

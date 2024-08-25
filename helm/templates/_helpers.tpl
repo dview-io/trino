@@ -62,6 +62,11 @@ Create chart name and version as used by the chart label.
 {{ template "trino.fullname" . }}-catalog
 {{- end -}}
 
+
+{{- define "trino.ranger" -}}
+{{ template "trino.fullname" . }}-ranger-config
+{{- end -}}
+
 {{/*
 Common labels
 */}}

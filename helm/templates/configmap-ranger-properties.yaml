@@ -1,7 +1,8 @@
+{{- if .Values.ranger.enabled | default false }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-    name: {{ .Release.Name }}-trino-ranger-config
+    name: {{ template "trino.ranger" . }}
     labels:
         app: {{ template "trino.name" . }}
         chart: {{ template "trino.chart" . }}
@@ -193,3 +194,5 @@ data:
         # keep blank if component group is default
         CUSTOM_GROUP=hadoop
         XAAUDIT.SUMMARY.ENABLE=false
+
+{{- end}}
