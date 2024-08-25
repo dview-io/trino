@@ -15,7 +15,15 @@ additionalCatalogs:
         s3.secretKey=
         s3.region=ap-south-1
 ranger:
+    enabled: true
     policy_manager_url: http://ranger-admin:6080
-    repository_name: trino_sandbox
+    repository_name: aqua
     elasticsearch:
         enabled: false
+    mountPath: /mnt/ranger/
+
+vs:
+    enabled: true
+
+git_sync:
+    enabled: true

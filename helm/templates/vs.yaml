@@ -1,18 +1,20 @@
+{{- if .Values.vs.enabled | default false }}
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
-    name: test-trino-virtual-svc
+    name: {{ template "trino.fullname" . }}
 spec:
     gateways:
         - istio-ingress/internal-gateway
     hosts:
-        - test-trino.default.dview.io
+        - {{ .Release.Name }}.dview.io
     http:
         -   match:
                 -   uri:
                         prefix: /
             route:
                 -   destination:
-                        host: test-trino.default.svc.cluster.local
+                        host: {{ template "trino.fullname" . }}
                         port:
                             number: 8080  # Change this to match the service port
+{{- end}}
