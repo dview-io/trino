@@ -356,7 +356,15 @@ ingress:
   #      - chart-example.local
 
 ranger:
+    enabled: true
     policy_manager_url: http://ranger-admin:6080
     repository_name: trino_sandbox
     elasticsearch:
         enabled: false
+    mountPath: /mnt/ranger/
+
+vs:
+    enabled: true
+
+git_sync:
+    enabled: true

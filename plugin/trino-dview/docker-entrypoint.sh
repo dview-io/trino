@@ -20,38 +20,43 @@ else
     TRINO_CONFIG_PATH="${TRINO_CONFIG_PATH%/}"
 fi
 
-# Check and set $RANGER_CONFIG_PATH
-if [ -z "$RANGER_CONFIG_PATH" ]; then
-    $RANGER_CONFIG_PATH="/mnt/ranger"
-    export RANGER_CONFIG_PATH
-else
-    RANGER_CONFIG_PATH="${RANGER_CONFIG_PATH%/}"
-fi
-
 TRINO_CONFIG_PATH=${TRINO_CONFIG_PATH%/}
 
-cp -r ${TRINO_MOUNT_CONFIG_PATH} ${TRINO_CONFIG_PATH}
+#cp -r ${TRINO_MOUNT_CONFIG_PATH} ${TRINO_CONFIG_PATH}
 
+cp -rT ${TRINO_MOUNT_CONFIG_PATH}/* ${TRINO_CONFIG_PATH}/
 
 # Iterate through each file in TRINO_MOUNT_CONFIG_PATH
-for file in "${TRINO_CONFIG_PATH%/}/trino"/*; do
+for file in "${TRINO_CONFIG_PATH%/}/catalog"/*; do
     if [[ -f "$file" ]]; then
         # Replace environment variables in the file using replace_env_vars.sh
         bash /root/replace_env_vars.sh "$file"
-        echo "File '$file' processed and copied to '${TRINO_CONFIG_PATH%/}/trino/catalog/$(basename "$file")'."
+#        echo "File '$file' processed and copied to '${TRINO_CONFIG_PATH%/}/catalog/$(basename "$file")'."
     fi
 done
 
-cp /mnt/ranger/install.properties /root/ranger-trino-plugin/
-bash /root/replace_env_vars.sh "/root/ranger-trino-plugin/install.properties"
+if [ "$RANGER_ENABLED" = "true" ]; then
+    if [ -z "$RANGER_CONFIG_PATH" ]; then
+        RANGER_CONFIG_PATH=false
+    fi
+  # Check and set $RANGER_CONFIG_PATH
+  if [ -z "$RANGER_CONFIG_PATH" ]; then
+      $RANGER_CONFIG_PATH="/mnt/ranger"
+      export RANGER_CONFIG_PATH
+  else
+      RANGER_CONFIG_PATH="${RANGER_CONFIG_PATH%/}"
+  fi
 
+  cp ${RANGER_CONFIG_PATH}/install.properties /root/ranger-trino-plugin/
+  bash /root/replace_env_vars.sh "/root/ranger-trino-plugin/install.properties"
 
-ACCESS_CONTROL_FILE="${TRINO_CONFIG_PATH}/trino/access-control.properties"
-# Check if the file exists
-if [ ! -f "$ACCESS_CONTROL_FILE" ]; then
-    touch $ACCESS_CONTROL_FILE
+  ACCESS_CONTROL_FILE="${TRINO_CONFIG_PATH}/access-control.properties"
+  # Check if the file exists
+  if [ ! -f "$ACCESS_CONTROL_FILE" ]; then
+      touch $ACCESS_CONTROL_FILE
+  fi
+
+  /root/ranger-trino-plugin/enable-trino-plugin.sh
 fi
-
-/root/ranger-trino-plugin/enable-trino-plugin.sh
 
 /usr/lib/trino/bin/run-trino
