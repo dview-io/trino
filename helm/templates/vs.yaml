@@ -7,7 +7,7 @@ spec:
     gateways:
         - istio-ingress/internal-gateway
     hosts:
-        - {{ .Release.Name }}.dview.io
+        - {{ template "trino.fullname" . }}.dview.io
     http:
         -   match:
                 -   uri:
@@ -17,4 +17,4 @@ spec:
                         host: {{ template "trino.fullname" . }}
                         port:
                             number: 8080  # Change this to match the service port
-{{- end}}
+{{- end }}

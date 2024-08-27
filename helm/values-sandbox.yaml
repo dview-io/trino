@@ -1,19 +1,12 @@
+image:
+    repository: dview/trino-dev
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart version.
+    # Same value as Chart.yaml#appVersion
+    tag: 444
+
 serviceAccount:
     create: true
-additionalCatalogs:
-    test.properties: |
-        connector.name= dview
-        mysql.url=jdbc:mysql:///fortress?useSSL=false
-        mysql.username=data
-        mysql.password=
-        client.type=EMBEDDED
-        connection.timeout= 3600
-        dview.org=dview
-        dview.tenant=analytics
-        dview.namespace=default
-        s3.accessKey=
-        s3.secretKey=
-        s3.region=ap-south-1
 ranger:
     enabled: true
     policy_manager_url: http://ranger-admin:6080
@@ -21,6 +14,9 @@ ranger:
     elasticsearch:
         enabled: false
     mountPath: /mnt/ranger/
+
+server:
+    workers: 1
 
 vs:
     enabled: true

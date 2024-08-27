@@ -48,6 +48,11 @@ spec:
       shareProcessNamespace: {{ .Values.shareProcessNamespace.worker }}
       {{- end }}
       volumes:
+        {{- if .Values.git_sync.enabled | default false }}
+        - emptyDir:
+            sizeLimit: 2Gi
+          name: git-sync
+        {{- end }}
         - name: config-volume
           configMap:
             name: {{ template "trino.worker" . }}
@@ -131,6 +136,7 @@ spec:
           volumeMounts:
             - mountPath: /mnt/data/repo/schemas
               name: git-sync
+        {{- end }}
         - name: {{ .Chart.Name }}-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -163,6 +169,11 @@ spec:
             {{- range .Values.worker.secretMounts }}
             - name: {{ .name }}
               mountPath: {{ .path }}
+            {{- end }}
+            {{- if .Values.git_sync.enabled | default false }}
+            - mountPath: /mnt/data/repo/schemas
+              name: git-sync
+              readOnly: true
             {{- end }}
 #            - name: trino-pvc
 #              mountPath: /
