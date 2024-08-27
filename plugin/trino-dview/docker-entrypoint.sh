@@ -47,6 +47,10 @@ if [ "$RANGER_ENABLED" = "true" ]; then
       RANGER_CONFIG_PATH="${RANGER_CONFIG_PATH%/}"
   fi
 
+  if [ -f /root/ranger-trino-plugin/install.properties ]; then
+      mv -f /root/ranger-trino-plugin/install.properties /root/ranger-trino-plugin/install-backup.properties
+  fi
+
   cp ${RANGER_CONFIG_PATH}/install.properties /root/ranger-trino-plugin/
   bash /root/replace_env_vars.sh "/root/ranger-trino-plugin/install.properties"
 
