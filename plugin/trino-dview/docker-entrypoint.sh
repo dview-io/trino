@@ -22,9 +22,7 @@ fi
 
 TRINO_CONFIG_PATH=${TRINO_CONFIG_PATH%/}
 
-#cp -r ${TRINO_MOUNT_CONFIG_PATH} ${TRINO_CONFIG_PATH}
-
-cp -rT ${TRINO_MOUNT_CONFIG_PATH}/* ${TRINO_CONFIG_PATH}/
+cp -r ${TRINO_MOUNT_CONFIG_PATH}/* ${TRINO_CONFIG_PATH}/
 
 # Iterate through each file in TRINO_MOUNT_CONFIG_PATH
 for file in "${TRINO_CONFIG_PATH%/}/catalog"/*; do
@@ -41,7 +39,7 @@ if [ "$RANGER_ENABLED" = "true" ]; then
     fi
   # Check and set $RANGER_CONFIG_PATH
   if [ -z "$RANGER_CONFIG_PATH" ]; then
-      $RANGER_CONFIG_PATH="/mnt/ranger"
+      RANGER_CONFIG_PATH="/mnt/ranger"
       export RANGER_CONFIG_PATH
   else
       RANGER_CONFIG_PATH="${RANGER_CONFIG_PATH%/}"
