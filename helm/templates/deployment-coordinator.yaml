@@ -155,9 +155,9 @@ spec:
         - name: {{ .Chart.Name }}-coordinator
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [ "/bin/bash", "-c" ]
-          args:
-              - "/usr/lib/trino/bin/run-trino"
+          #command: [ "/bin/bash", "-c" ]
+          #args:
+          #    - "/usr/lib/trino/bin/run-trino"
           env:
             - name: RANGER_ENABLED
               value: "{{ .Values.ranger.enabled | default false }}"
