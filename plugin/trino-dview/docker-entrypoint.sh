@@ -19,11 +19,23 @@ fi
 TRINO_CONFIG_PATH="${TRINO_CONFIG_PATH%/}"
 export TRINO_CONFIG_PATH
 
-mkdir -p "$TRINO_CONFIG_PATH"
+#mkdir -p "$TRINO_CONFIG_PATH"
 
-rm -rf "${TRINO_CONFIG_PATH:?}"/*
+TRINO_MOUNT_CONFIG_CATALOG_PATH="$TRINO_MOUNT_CONFIG_PATH/catalog"
+TRINO_CONFIG_CATALOG_PATH="$TRINO_CONFIG_PATH/catalog"
 
-cp -a "${TRINO_MOUNT_CONFIG_PATH}/." "$TRINO_CONFIG_PATH"
+for item in "$TRINO_MOUNT_CONFIG_CATALOG_PATH"/*; do
+    base_name=$(basename "$item")
+    target_path="$TRINO_CONFIG_CATALOG_PATH/$base_name"
+
+    if [ ! -e "$target_path" ]; then
+        if [ -d "$item" ]; then
+            cp -r "$item" "$TRINO_CONFIG_CATALOG_PATH"
+        else
+            cp "$item" "$TRINO_CONFIG_CATALOG_PATH"
+        fi
+    fi
+done
 
 # Iterate through each file in TRINO_CONFIG_PATH
 for file in "${TRINO_CONFIG_PATH%/}/catalog"/*; do
@@ -42,13 +54,13 @@ if [ "$RANGER_ENABLED" = "true" ]; then
       mv -f /root/ranger-trino-plugin/install.properties /root/ranger-trino-plugin/install-backup.properties
   fi
 
-  cp ${RANGER_CONFIG_PATH}/install.properties /root/ranger-trino-plugin/
+  cp "${RANGER_CONFIG_PATH}"/install.properties /root/ranger-trino-plugin/
   bash /root/replace_env_vars.sh "/root/ranger-trino-plugin/install.properties"
 
   ACCESS_CONTROL_FILE="${TRINO_CONFIG_PATH}/access-control.properties"
   # Check if the file exists
   if [ ! -f "$ACCESS_CONTROL_FILE" ]; then
-      touch $ACCESS_CONTROL_FILE
+      touch "$ACCESS_CONTROL_FILE"
   fi
 
   /root/ranger-trino-plugin/enable-trino-plugin.sh
