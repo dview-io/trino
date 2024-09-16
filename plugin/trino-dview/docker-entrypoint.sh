@@ -19,30 +19,31 @@ fi
 TRINO_CONFIG_PATH="${TRINO_CONFIG_PATH%/}"
 export TRINO_CONFIG_PATH
 
-#mkdir -p "$TRINO_CONFIG_PATH"
+mkdir -p "$TRINO_CONFIG_PATH"
 
-TRINO_MOUNT_CONFIG_CATALOG_PATH="$TRINO_MOUNT_CONFIG_PATH/catalog"
-TRINO_CONFIG_CATALOG_PATH="$TRINO_CONFIG_PATH/catalog"
+rm -rf "${TRINO_CONFIG_PATH:?}"/*
 
-for item in "$TRINO_MOUNT_CONFIG_CATALOG_PATH"/*; do
-    base_name=$(basename "$item")
-    target_path="$TRINO_CONFIG_CATALOG_PATH/$base_name"
+cp -a "${TRINO_MOUNT_CONFIG_PATH}/." "$TRINO_CONFIG_PATH"
 
-    if [ ! -e "$target_path" ]; then
-        if [ -d "$item" ]; then
-            cp -r "$item" "$TRINO_CONFIG_CATALOG_PATH"
-        else
-            cp "$item" "$TRINO_CONFIG_CATALOG_PATH"
-        fi
-    fi
-done
+#for item in "$TRINO_MOUNT_CONFIG_CATALOG_PATH"/*; do
+#    base_name=$(basename "$item")
+#    target_path="$TRINO_CONFIG_CATALOG_PATH/$base_name"
+#
+#    if [ ! -e "$target_path" ]; then
+#        if [ -d "$item" ]; then
+#            cp -r "$item" "$TRINO_CONFIG_CATALOG_PATH"
+#        else
+#            cp "$item" "$TRINO_CONFIG_CATALOG_PATH"
+#        fi
+#    fi
+#done
 
 # Iterate through each file in TRINO_CONFIG_PATH
-for file in "${TRINO_CONFIG_PATH%/}/catalog"/*; do
-    if [[ -f "$file" ]]; then
-        bash /root/replace_env_vars.sh "$file"
-    fi
-done
+#for file in "${TRINO_CONFIG_PATH%/}/catalog"/*; do
+#    if [[ -f "$file" ]]; then
+#        bash /root/replace_env_vars.sh "$file"
+#    fi
+#done
 
 if [ "$RANGER_ENABLED" = "true" ]; then
   if [ -z "$RANGER_CONFIG_PATH" ]; then
