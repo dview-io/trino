@@ -80,7 +80,8 @@ statement
     | ALTER TABLE (IF EXISTS)? from=qualifiedName
         RENAME TO to=qualifiedName                                     #renameTable
     | ALTER TABLE (IF EXISTS)? tableName=qualifiedName
-        ADD COLUMN (IF NOT EXISTS)? column=columnDefinition            #addColumn
+        ADD COLUMN (IF NOT EXISTS)? column=columnDefinition
+        (FIRST | LAST | AFTER after=identifier)?                       #addColumn
     | ALTER TABLE (IF EXISTS)? tableName=qualifiedName
         RENAME COLUMN (IF EXISTS)? from=qualifiedName TO to=identifier #renameColumn
     | ALTER TABLE (IF EXISTS)? tableName=qualifiedName
@@ -121,7 +122,7 @@ statement
     | CREATE ROLE name=identifier
         (WITH ADMIN grantor)?
         (IN catalog=identifier)?                                       #createRole
-    | DROP ROLE name=identifier (IN catalog=identifier)?               #dropRole
+    | DROP ROLE (IF EXISTS)? name=identifier (IN catalog=identifier)?  #dropRole
     | GRANT
         privilegeOrRole (',' privilegeOrRole)*
         TO principal (',' principal)*
@@ -157,6 +158,7 @@ statement
     | SHOW CREATE SCHEMA qualifiedName                                 #showCreateSchema
     | SHOW CREATE VIEW qualifiedName                                   #showCreateView
     | SHOW CREATE MATERIALIZED VIEW qualifiedName                      #showCreateMaterializedView
+    | SHOW CREATE FUNCTION qualifiedName                               #showCreateFunction
     | SHOW TABLES ((FROM | IN) qualifiedName)?
         (LIKE pattern=string (ESCAPE escape=string)?)?                 #showTables
     | SHOW SCHEMAS ((FROM | IN) identifier)?
@@ -570,7 +572,7 @@ primaryExpression
     | name=LISTAGG '(' setQuantifier? expression (',' string)?
         (ON OVERFLOW listAggOverflowBehavior)? ')'
         (WITHIN GROUP '(' ORDER BY sortItem (',' sortItem)* ')')
-        filter?                                                                           #listagg
+        filter? over?                                                                     #listagg
     | processingMode? qualifiedName '(' (label=identifier '.')? ASTERISK ')'
         filter? over?                                                                     #functionCall
     | processingMode? qualifiedName '(' (setQuantifier? expression (',' expression)*)?
@@ -860,7 +862,12 @@ pathSpecification
     ;
 
 functionSpecification
-    : FUNCTION functionDeclaration returnsClause routineCharacteristic* controlStatement
+    : FUNCTION functionDeclaration returnsClause routineCharacteristic*
+        (controlStatement | AS functionDefinition)
+    ;
+
+functionDefinition
+    : DOLLAR_STRING
     ;
 
 functionDeclaration
@@ -882,6 +889,7 @@ routineCharacteristic
     | CALLED ON NULL INPUT              #calledOnNullInputCharacteristic
     | SECURITY (DEFINER | INVOKER)      #securityCharacteristic
     | COMMENT string                    #commentCharacteristic
+    | (WITH properties)                 #propertiesCharacteristic
     ;
 
 controlStatement
@@ -960,7 +968,7 @@ roles
     ;
 
 privilegeOrRole
-    : CREATE | SELECT | DELETE | INSERT | UPDATE | EXECUTE | identifier
+    : CREATE | SELECT | DELETE | INSERT | UPDATE | identifier
     ;
 
 identifier
@@ -988,7 +996,7 @@ nonReserved
     | BEGIN | BERNOULLI | BOTH
     | CALL | CALLED | CASCADE | CATALOG | CATALOGS | COLUMN | COLUMNS | COMMENT | COMMIT | COMMITTED | CONDITIONAL | COPARTITION | COUNT | CURRENT
     | DATA | DATE | DAY | DECLARE | DEFAULT | DEFINE | DEFINER | DENY | DESC | DESCRIPTOR | DETERMINISTIC | DISTRIBUTED | DO | DOUBLE
-    | ELSEIF | EMPTY | ENCODING | ERROR | EXCLUDING | EXPLAIN
+    | ELSEIF | EMPTY | ENCODING | ERROR | EXCLUDING | EXECUTE | EXPLAIN
     | FETCH | FILTER | FINAL | FIRST | FOLLOWING | FORMAT | FUNCTION | FUNCTIONS
     | GRACE | GRANT | GRANTED | GRANTS | GRAPHVIZ | GROUPS
     | HOUR
@@ -1329,6 +1337,10 @@ STRING
 
 UNICODE_STRING
     : 'U&\'' ( ~'\'' | '\'\'' )* '\''
+    ;
+
+DOLLAR_STRING
+    : '$$' .*? '$$'
     ;
 
 // Note: we allow any character inside the binary literal and validate
