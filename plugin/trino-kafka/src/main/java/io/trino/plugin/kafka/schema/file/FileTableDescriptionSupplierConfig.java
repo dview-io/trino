@@ -23,25 +23,33 @@ import jakarta.validation.constraints.NotNull;
 import java.io.File;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class FileTableDescriptionSupplierConfig
 {
-    private Set<String> tableNames = ImmutableSet.of();
+    private final AtomicReference<Set<String>> tableNames = new AtomicReference<>(ImmutableSet.of());
     private File tableDescriptionDir = new File("etc/kafka/");
     private Duration schemaRefreshInterval = new Duration(1, TimeUnit.MINUTES);
 
     @NotNull
     public Set<String> getTableNames()
     {
-        return tableNames;
+        return tableNames.get();
     }
 
     @Config("kafka.table-names")
     @ConfigDescription("Set of tables known to this connector")
     public FileTableDescriptionSupplierConfig setTableNames(String tableNames)
     {
-        this.tableNames = ImmutableSet.copyOf(Splitter.on(',').omitEmptyStrings().trimResults().split(tableNames));
+        if (tableNames != null && !tableNames.isEmpty()) {
+            this.tableNames.set(ImmutableSet.copyOf(Splitter.on(',').omitEmptyStrings().trimResults().split(tableNames)));
+        }
         return this;
+    }
+
+    public void updateTableNames(Set<String> newTableNames)
+    {
+        this.tableNames.set(ImmutableSet.copyOf(newTableNames));
     }
 
     @NotNull

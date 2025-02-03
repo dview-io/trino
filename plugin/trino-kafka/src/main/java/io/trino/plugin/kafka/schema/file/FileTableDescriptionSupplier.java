@@ -21,7 +21,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
 import io.trino.decoder.dummy.DummyRowDecoder;
@@ -35,12 +34,14 @@ import io.trino.spi.connector.SchemaTableName;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
@@ -58,7 +59,7 @@ public class FileTableDescriptionSupplier
     private final JsonCodec<KafkaTopicDescription> topicDescriptionCodec;
     private final File tableDescriptionDir;
     private final String defaultSchema;
-    private final Set<String> tableNames;
+    private final FileTableDescriptionSupplierConfig config;
     private final LoadingCache<String, Map<SchemaTableName, KafkaTopicDescription>> tableDescriptionCache;
 
     @Inject
@@ -67,7 +68,7 @@ public class FileTableDescriptionSupplier
         this.topicDescriptionCodec = requireNonNull(topicDescriptionCodec, "topicDescriptionCodec is null");
         this.tableDescriptionDir = config.getTableDescriptionDir();
         this.defaultSchema = kafkaConfig.getDefaultSchema();
-        this.tableNames = ImmutableSet.copyOf(config.getTableNames());
+        this.config = config;
 
         this.tableDescriptionCache = CacheBuilder.newBuilder()
                 .refreshAfterWrite(config.getSchemaRefreshInterval().toMillis(), TimeUnit.MILLISECONDS)
@@ -99,6 +100,7 @@ public class FileTableDescriptionSupplier
     private Map<SchemaTableName, KafkaTopicDescription> populateTables()
     {
         ImmutableMap.Builder<SchemaTableName, KafkaTopicDescription> builder = ImmutableMap.builder();
+        Set<String> discoveredTableNames = new HashSet<>();
 
         log.debug("Loading kafka table definitions from %s", tableDescriptionDir.getAbsolutePath());
 
@@ -107,39 +109,48 @@ public class FileTableDescriptionSupplier
                 if (file.isFile() && file.getName().endsWith(".json")) {
                     KafkaTopicDescription table = topicDescriptionCodec.fromJson(readAllBytes(file.toPath()));
                     String schemaName = table.getSchemaName().orElse(defaultSchema);
+                    SchemaTableName schemaTableName = new SchemaTableName(schemaName, table.getTableName());
                     log.debug("Kafka table %s.%s: %s", schemaName, table.getTableName(), table);
-                    builder.put(new SchemaTableName(schemaName, table.getTableName()), table);
+                    builder.put(schemaTableName, table);
+                    discoveredTableNames.add(schemaTableName.toString());
                 }
             }
+
+            // Update the config with discovered table names
+            config.updateTableNames(discoveredTableNames);
 
             Map<SchemaTableName, KafkaTopicDescription> tableDefinitions = builder.buildOrThrow();
-
             log.debug("Loaded Table definitions: %s", tableDefinitions.keySet());
 
-            builder = ImmutableMap.builder();
-            for (String definedTable : tableNames) {
-                SchemaTableName tableName;
-                try {
-                    tableName = parseTableName(definedTable);
-                }
-                catch (IllegalArgumentException iae) {
-                    tableName = new SchemaTableName(defaultSchema, definedTable);
-                }
+            // Create dummy tables for any explicitly configured tables that weren't found
+            Set<String> configuredTables = config.getTableNames();
+            if (!configuredTables.isEmpty()) {
+                builder = ImmutableMap.builder();
+                builder.putAll(tableDefinitions);
 
-                if (!tableDefinitions.containsKey(tableName)) {
-                    log.debug("Table %s.%s does not have a table definition, using dummy decoder", tableName.getSchemaName(), tableName.getTableName());
-                    builder.put(tableName, new KafkaTopicDescription(
-                            tableName.getTableName(),
-                            Optional.of(tableName.getSchemaName()),
-                            definedTable,
-                            Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of())),
-                            Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of()))));
+                for (String definedTable : configuredTables) {
+                    SchemaTableName tableName;
+                    try {
+                        tableName = parseTableName(definedTable);
+                    }
+                    catch (IllegalArgumentException iae) {
+                        tableName = new SchemaTableName(defaultSchema, definedTable);
+                    }
+
+                    if (!tableDefinitions.containsKey(tableName)) {
+                        log.debug("Table %s.%s does not have a table definition, using dummy decoder", tableName.getSchemaName(), tableName.getTableName());
+                        builder.put(tableName, new KafkaTopicDescription(
+                                tableName.getTableName(),
+                                Optional.of(tableName.getSchemaName()),
+                                definedTable,
+                                Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of())),
+                                Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of()))));
+                    }
                 }
-                else {
-                    builder.put(tableName, tableDefinitions.get(tableName));
-                }
+                return builder.buildOrThrow();
             }
-            return builder.buildOrThrow();
+
+            return tableDefinitions;
         }
         catch (IOException e) {
             log.warn(e, "Error loading table definitions from %s", tableDescriptionDir.getAbsolutePath());
