@@ -17,15 +17,18 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
+import io.airlift.units.Duration;
 import jakarta.validation.constraints.NotNull;
 
 import java.io.File;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class FileTableDescriptionSupplierConfig
 {
     private Set<String> tableNames = ImmutableSet.of();
     private File tableDescriptionDir = new File("etc/kafka/");
+    private Duration schemaRefreshInterval = new Duration(1, TimeUnit.MINUTES);
 
     @NotNull
     public Set<String> getTableNames()
@@ -52,6 +55,20 @@ public class FileTableDescriptionSupplierConfig
     public FileTableDescriptionSupplierConfig setTableDescriptionDir(File tableDescriptionDir)
     {
         this.tableDescriptionDir = tableDescriptionDir;
+        return this;
+    }
+
+    @NotNull
+    public Duration getSchemaRefreshInterval()
+    {
+        return schemaRefreshInterval;
+    }
+
+    @Config("kafka.schema-refresh-interval")
+    @ConfigDescription("How frequently to refresh the schema from the JSON files")
+    public FileTableDescriptionSupplierConfig setSchemaRefreshInterval(Duration schemaRefreshInterval)
+    {
+        this.schemaRefreshInterval = schemaRefreshInterval;
         return this;
     }
 }

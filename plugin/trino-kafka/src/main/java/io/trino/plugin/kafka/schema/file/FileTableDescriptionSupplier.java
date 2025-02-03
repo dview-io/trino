@@ -14,6 +14,9 @@
 package io.trino.plugin.kafka.schema.file;
 
 import com.google.common.base.Splitter;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -25,8 +28,8 @@ import io.trino.decoder.dummy.DummyRowDecoder;
 import io.trino.plugin.kafka.KafkaConfig;
 import io.trino.plugin.kafka.KafkaTopicDescription;
 import io.trino.plugin.kafka.KafkaTopicFieldGroup;
-import io.trino.plugin.kafka.schema.MapBasedTableDescriptionSupplier;
 import io.trino.plugin.kafka.schema.TableDescriptionSupplier;
+import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.SchemaTableName;
 
 import java.io.File;
@@ -36,6 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
@@ -44,7 +49,7 @@ import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
 
 public class FileTableDescriptionSupplier
-        implements Provider<TableDescriptionSupplier>
+        implements TableDescriptionSupplier
 {
     public static final String NAME = "file";
 
@@ -54,21 +59,41 @@ public class FileTableDescriptionSupplier
     private final File tableDescriptionDir;
     private final String defaultSchema;
     private final Set<String> tableNames;
+    private final LoadingCache<String, Map<SchemaTableName, KafkaTopicDescription>> tableDescriptionCache;
 
     @Inject
-    FileTableDescriptionSupplier(FileTableDescriptionSupplierConfig config, KafkaConfig kafkaConfig, JsonCodec<KafkaTopicDescription> topicDescriptionCodec)
+    public FileTableDescriptionSupplier(FileTableDescriptionSupplierConfig config, KafkaConfig kafkaConfig, JsonCodec<KafkaTopicDescription> topicDescriptionCodec)
     {
         this.topicDescriptionCodec = requireNonNull(topicDescriptionCodec, "topicDescriptionCodec is null");
         this.tableDescriptionDir = config.getTableDescriptionDir();
         this.defaultSchema = kafkaConfig.getDefaultSchema();
         this.tableNames = ImmutableSet.copyOf(config.getTableNames());
+
+        this.tableDescriptionCache = CacheBuilder.newBuilder()
+                .refreshAfterWrite(config.getSchemaRefreshInterval().toMillis(), TimeUnit.MILLISECONDS)
+                .build(CacheLoader.from(this::populateTables));
     }
 
     @Override
-    public TableDescriptionSupplier get()
+    public Set<SchemaTableName> listTables()
     {
-        Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
-        return new MapBasedTableDescriptionSupplier(tables);
+        try {
+            return ImmutableSet.copyOf(tableDescriptionCache.get(tableDescriptionDir.getAbsolutePath()).keySet());
+        }
+        catch (ExecutionException e) {
+            throw new RuntimeException("Failed to load table descriptions", e);
+        }
+    }
+
+    @Override
+    public Optional<KafkaTopicDescription> getTopicDescription(ConnectorSession session, SchemaTableName schemaTableName)
+    {
+        try {
+            return Optional.ofNullable(tableDescriptionCache.get(tableDescriptionDir.getAbsolutePath()).get(schemaTableName));
+        }
+        catch (ExecutionException e) {
+            throw new RuntimeException("Failed to load table descriptions", e);
+        }
     }
 
     private Map<SchemaTableName, KafkaTopicDescription> populateTables()
@@ -101,38 +126,33 @@ public class FileTableDescriptionSupplier
                     tableName = new SchemaTableName(defaultSchema, definedTable);
                 }
 
-                if (tableDefinitions.containsKey(tableName)) {
-                    KafkaTopicDescription kafkaTable = tableDefinitions.get(tableName);
-                    log.debug("Found Table definition for %s: %s", tableName, kafkaTable);
-                    builder.put(tableName, kafkaTable);
-                }
-                else {
-                    // A dummy table definition only supports the internal columns.
-                    log.debug("Created dummy Table definition for %s", tableName);
+                if (!tableDefinitions.containsKey(tableName)) {
+                    log.debug("Table %s.%s does not have a table definition, using dummy decoder", tableName.getSchemaName(), tableName.getTableName());
                     builder.put(tableName, new KafkaTopicDescription(
                             tableName.getTableName(),
-                            Optional.ofNullable(tableName.getSchemaName()),
+                            Optional.of(tableName.getSchemaName()),
                             definedTable,
                             Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of())),
                             Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of()))));
                 }
+                else {
+                    builder.put(tableName, tableDefinitions.get(tableName));
+                }
             }
-
             return builder.buildOrThrow();
         }
         catch (IOException e) {
-            log.warn(e, "Failed to get table description files for Kafka");
+            log.warn(e, "Error loading table definitions from %s", tableDescriptionDir.getAbsolutePath());
             throw new UncheckedIOException(e);
         }
     }
 
     private static List<File> listFiles(File dir)
     {
-        if ((dir != null) && dir.isDirectory()) {
+        if (dir != null && dir.isDirectory()) {
             File[] files = dir.listFiles();
             if (files != null) {
-                log.debug("Considering files: %s", asList(files));
-                return ImmutableList.copyOf(files);
+                return asList(files);
             }
         }
         return ImmutableList.of();
@@ -140,7 +160,7 @@ public class FileTableDescriptionSupplier
 
     private static SchemaTableName parseTableName(String schemaTableName)
     {
-        checkArgument(!isNullOrEmpty(schemaTableName), "schemaTableName is null or is empty");
+        checkArgument(!isNullOrEmpty(schemaTableName), "schemaTableName is null or empty");
         List<String> parts = Splitter.on('.').splitToList(schemaTableName);
         checkArgument(parts.size() == 2, "Invalid schemaTableName: %s", schemaTableName);
         return new SchemaTableName(parts.get(0), parts.get(1));
