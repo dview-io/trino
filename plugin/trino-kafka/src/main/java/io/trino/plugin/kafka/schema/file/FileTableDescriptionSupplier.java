@@ -16,7 +16,6 @@ package io.trino.plugin.kafka.schema.file;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import io.airlift.json.JsonCodec;
@@ -36,12 +35,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static java.nio.file.Files.readAllBytes;
 import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 public class FileTableDescriptionSupplier
         implements Provider<TableDescriptionSupplier>
@@ -54,21 +59,66 @@ public class FileTableDescriptionSupplier
     private final File tableDescriptionDir;
     private final String defaultSchema;
     private final Set<String> tableNames;
+    private final AtomicReference<TableDescriptionSupplier> tableDescriptionSupplier;
+    private final FileTableDescriptionSupplierConfig config;
 
     @Inject
     FileTableDescriptionSupplier(FileTableDescriptionSupplierConfig config, KafkaConfig kafkaConfig, JsonCodec<KafkaTopicDescription> topicDescriptionCodec)
     {
+        this.config = requireNonNull(config, "config is null");
         this.topicDescriptionCodec = requireNonNull(topicDescriptionCodec, "topicDescriptionCodec is null");
         this.tableDescriptionDir = config.getTableDescriptionDir();
         this.defaultSchema = kafkaConfig.getDefaultSchema();
-        this.tableNames = ImmutableSet.copyOf(config.getTableNames());
+        this.tableNames = config.getTableNames();
+        long schemaRefreshInterval = config.getSchemaRefreshInterval();
+        this.tableDescriptionSupplier = new AtomicReference<>(createTableDescriptionSupplier());
+        // Custom ThreadFactory to set a specific thread name
+        ThreadFactory namedThreadFactory = runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("kafka-schema-refresh-%s");
+            return thread;
+        };
+        ScheduledExecutorService executorService = newSingleThreadScheduledExecutor(namedThreadFactory);
+
+        // Schedule periodic refresh
+        executorService.scheduleWithFixedDelay(
+                this::refreshTableDescriptions,
+                schemaRefreshInterval,
+                schemaRefreshInterval,
+                TimeUnit.MILLISECONDS);
+    }
+
+    private void refreshTableDescriptions()
+    {
+        try {
+            // First populate tables to get the latest table names
+            Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
+
+            // Update the table names in the config
+            Set<String> newTableNames = tables.keySet().stream()
+                    .map(name -> name.getSchemaName() + "." + name.getTableName())
+                    .collect(toImmutableSet());
+            config.updateTableNames(newTableNames);
+
+            // Update the table description supplier
+            tableDescriptionSupplier.set(new MapBasedTableDescriptionSupplier(tables));
+            log.debug("Refreshed Kafka table descriptions and updated table names");
+        }
+        catch (Exception e) {
+            log.error(e, "Failed to refresh Kafka table descriptions");
+        }
+    }
+
+    private TableDescriptionSupplier createTableDescriptionSupplier()
+    {
+        Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
+        return new MapBasedTableDescriptionSupplier(tables);
     }
 
     @Override
     public TableDescriptionSupplier get()
     {
-        Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
-        return new MapBasedTableDescriptionSupplier(tables);
+        return tableDescriptionSupplier.get();
     }
 
     private Map<SchemaTableName, KafkaTopicDescription> populateTables()

@@ -26,19 +26,27 @@ public class FileTableDescriptionSupplierConfig
 {
     private Set<String> tableNames = ImmutableSet.of();
     private File tableDescriptionDir = new File("etc/kafka/");
+    private long schemaRefreshInterval = 300000; // Default 300 seconds
 
-    @NotNull
     public Set<String> getTableNames()
     {
         return tableNames;
     }
 
     @Config("kafka.table-names")
-    @ConfigDescription("Set of tables known to this connector")
+    @ConfigDescription("Optional set of tables known to this connector. If not specified, table names will be derived from JSON schema files.")
     public FileTableDescriptionSupplierConfig setTableNames(String tableNames)
     {
-        this.tableNames = ImmutableSet.copyOf(Splitter.on(',').omitEmptyStrings().trimResults().split(tableNames));
+        if (!isNullOrEmpty(tableNames)) {
+            this.tableNames = ImmutableSet.copyOf(
+                    Splitter.on(',').omitEmptyStrings().trimResults().split(tableNames));
+        }
         return this;
+    }
+
+    public void updateTableNames(Set<String> tableNames)
+    {
+        this.tableNames = ImmutableSet.copyOf(tableNames);
     }
 
     @NotNull
@@ -53,5 +61,23 @@ public class FileTableDescriptionSupplierConfig
     {
         this.tableDescriptionDir = tableDescriptionDir;
         return this;
+    }
+
+    public long getSchemaRefreshInterval()
+    {
+        return schemaRefreshInterval;
+    }
+
+    @Config("kafka.schema-refresh-interval")
+    @ConfigDescription("How frequently to refresh the schema from the table description files (in milliseconds)")
+    public FileTableDescriptionSupplierConfig setSchemaRefreshInterval(long schemaRefreshInterval)
+    {
+        this.schemaRefreshInterval = schemaRefreshInterval;
+        return this;
+    }
+
+    private boolean isNullOrEmpty(String str)
+    {
+        return str == null || str.isEmpty();
     }
 }
