@@ -42,13 +42,13 @@ if [ "$RANGER_ENABLED" = "true" ]; then
       mv -f /root/ranger-trino-plugin/install.properties /root/ranger-trino-plugin/install-backup.properties
   fi
 
-  cp ${RANGER_CONFIG_PATH}/install.properties /root/ranger-trino-plugin/
+  cp "${RANGER_CONFIG_PATH}/install.properties" /root/ranger-trino-plugin/
   bash /root/replace_env_vars.sh "/root/ranger-trino-plugin/install.properties"
 
   ACCESS_CONTROL_FILE="${TRINO_CONFIG_PATH}/access-control.properties"
   # Check if the file exists
   if [ ! -f "$ACCESS_CONTROL_FILE" ]; then
-      touch $ACCESS_CONTROL_FILE
+      touch "$ACCESS_CONTROL_FILE"
   fi
 
   /root/ranger-trino-plugin/enable-trino-plugin.sh
