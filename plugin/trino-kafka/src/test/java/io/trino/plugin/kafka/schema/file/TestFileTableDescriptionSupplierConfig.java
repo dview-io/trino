@@ -14,7 +14,6 @@
 package io.trino.plugin.kafka.schema.file;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -31,7 +30,7 @@ public class TestFileTableDescriptionSupplierConfig
     {
         assertRecordedDefaults(recordDefaults(FileTableDescriptionSupplierConfig.class)
                 .setTableDescriptionDir(new File("etc/kafka"))
-                .setTableNames(ImmutableSet.of()));
+                .setTableNames(""));
     }
 
     @Test
@@ -44,7 +43,7 @@ public class TestFileTableDescriptionSupplierConfig
 
         FileTableDescriptionSupplierConfig expected = new FileTableDescriptionSupplierConfig()
                 .setTableDescriptionDir(new File("/var/lib/kafka"))
-                .setTableNames(ImmutableSet.of("table1", "table2", "table3"));
+                .setTableNames("table1,table2,table3");
         assertFullMapping(properties, expected);
     }
 }
