@@ -1,0 +1,25 @@
+image:
+    repository: dview/trino-dev
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart version.
+    # Same value as Chart.yaml#appVersion
+    tag: 444
+
+serviceAccount:
+    create: true
+ranger:
+    enabled: true
+    policy_manager_url: http://ranger-admin:6080
+    repository_name: aqua
+    elasticsearch:
+        enabled: false
+    mountPath: /mnt/ranger/
+
+server:
+    workers: 1
+
+vs:
+    enabled: true
+
+git_sync:
+    enabled: true
