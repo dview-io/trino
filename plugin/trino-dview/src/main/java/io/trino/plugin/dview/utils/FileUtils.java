@@ -29,8 +29,8 @@ public class FileUtils
         switch (cloudProvider.getName()) {
             case S3:
                 HiveS3Config hiveS3Config = new HiveS3Config();
-                hiveS3Config.setS3AwsAccessKey(System.getenv("accessKey"));
-                hiveS3Config.setS3AwsSecretKey(System.getenv("secretKey"));
+//                hiveS3Config.setS3AwsAccessKey(System.getenv("accessKey"));
+//                hiveS3Config.setS3AwsSecretKey(System.getenv("secretKey"));
                 hiveS3Config.setS3Region(cloudProvider.getRegion());
 //                hiveS3Config.setS3SslEnabled(true);
 //                hiveS3Config.setS3PathStyleAccess(true);

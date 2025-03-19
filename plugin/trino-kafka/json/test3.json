@@ -1,0 +1,68 @@
+{
+    "tableName": "analytics_dbt_test3",
+    "schemaName": "stream1",
+    "topicName": "dview.analytics.dbt.test3",
+    "key": {
+        "dataFormat": "raw",
+        "fields": [
+            {
+                "name": "kafka_key",
+                "dataFormat": "LONG",
+                "type": "BIGINT",
+                "hidden": true
+            }
+        ]
+    },
+    "message": {
+        "dataFormat": "json",
+        "fields": [
+            {
+                "name": "last_name",
+                "mapping": "last_name",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "created_at",
+                "mapping": "created_at",
+                "type": "TIMESTAMP",
+                "dataFormat": "custom-date-time",
+                "formatHint": "yyyy-MM-dd HH:mm:ss"
+            },
+            {
+                "name": "customer_id",
+                "mapping": "customer_id",
+                "type": "INTEGER"
+            },
+            {
+                "name": "first_name",
+                "mapping": "first_name",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "email",
+                "mapping": "email",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "dpt_opCode",
+                "mapping": "dpt_opCode",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "dpt_createdAt",
+                "mapping": "dpt_createdAt",
+                "type": "BIGINT"
+            },
+            {
+                "name": "dpt_updatedAt",
+                "mapping": "dpt_updatedAt",
+                "type": "BIGINT"
+            },
+            {
+                "name": "dpt_ingestedAt",
+                "mapping": "dpt_ingestedAt",
+                "type": "BIGINT"
+            }
+        ]
+    }
+}

@@ -40,7 +40,6 @@ public class DviewSplit
         this.filePath = filePath;
     }
 
-
     @Override
     public List<HostAddress> getAddresses()
     {

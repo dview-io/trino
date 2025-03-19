@@ -44,7 +44,6 @@ import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.statistics.ComputedStatistics;
-import jakarta.annotation.Nullable;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -104,7 +103,8 @@ public class DviewConnectorMetadata
     }
 
     @Override
-    public DviewTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName, Optional<ConnectorTableVersion> startVersion, Optional<ConnectorTableVersion> endVersion) {
+    public DviewTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName, Optional<ConnectorTableVersion> startVersion, Optional<ConnectorTableVersion> endVersion)
+    {
         log.info("Entering into DviewConnectorMetadata::getTableHandle");
         if (!listSchemaNames(session).contains(tableName.getSchemaName())) {
             return null;
@@ -188,7 +188,8 @@ public class DviewConnectorMetadata
     }
 
     @Override
-    public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, SaveMode saveMode) {
+    public void createTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, SaveMode saveMode)
+    {
         log.info("Entering into DviewConnectorMetadata::createTable");
         dviewClient.createTable(tableMetadata);
         dviewClient.refresh();
@@ -219,13 +220,15 @@ public class DviewConnectorMetadata
     }
 
     @Override
-    public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session, ConnectorInsertTableHandle insertHandle, List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics) {
+    public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session, ConnectorInsertTableHandle insertHandle, List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics)
+    {
         log.info("Entering into DviewConnectorMetadata::finishInsert");
         return Optional.empty();
     }
 
     @Override
-    public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, Optional<ConnectorTableLayout> layout, RetryMode retryMode, boolean replace) {
+    public ConnectorOutputTableHandle beginCreateTable(ConnectorSession session, ConnectorTableMetadata tableMetadata, Optional<ConnectorTableLayout> layout, RetryMode retryMode, boolean replace)
+    {
         log.info("Entering into DviewConnectorMetadata::beginCreateTable");
         dviewClient.refresh();
         SchemaTableName tableName = tableMetadata.getTable();

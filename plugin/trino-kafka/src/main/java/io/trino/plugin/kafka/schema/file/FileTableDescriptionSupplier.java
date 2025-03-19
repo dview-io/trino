@@ -20,11 +20,9 @@ import com.google.inject.Inject;
 import com.google.inject.Provider;
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
-import io.trino.decoder.dummy.DummyRowDecoder;
 import io.trino.plugin.kafka.KafkaConfig;
 import io.trino.plugin.kafka.KafkaTopicDescription;
-import io.trino.plugin.kafka.KafkaTopicFieldGroup;
-import io.trino.plugin.kafka.schema.MapBasedTableDescriptionSupplier;
+import io.trino.plugin.kafka.schema.SuplierMapBasedTableDescriptionSupplier;
 import io.trino.plugin.kafka.schema.TableDescriptionSupplier;
 import io.trino.spi.connector.SchemaTableName;
 
@@ -33,7 +31,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -61,6 +58,7 @@ public class FileTableDescriptionSupplier
     private final Set<String> tableNames;
     private final AtomicReference<TableDescriptionSupplier> tableDescriptionSupplier;
     private final FileTableDescriptionSupplierConfig config;
+    Map<SchemaTableName, KafkaTopicDescription> tables;
 
     @Inject
     FileTableDescriptionSupplier(FileTableDescriptionSupplierConfig config, KafkaConfig kafkaConfig, JsonCodec<KafkaTopicDescription> topicDescriptionCodec)
@@ -79,29 +77,28 @@ public class FileTableDescriptionSupplier
             return thread;
         };
         ScheduledExecutorService executorService = newSingleThreadScheduledExecutor(namedThreadFactory);
-
+        this.refreshTableDescriptions();
         // Schedule periodic refresh
         executorService.scheduleWithFixedDelay(
                 this::refreshTableDescriptions,
                 schemaRefreshInterval,
                 schemaRefreshInterval,
                 TimeUnit.MILLISECONDS);
+        tableDescriptionSupplier.set(new SuplierMapBasedTableDescriptionSupplier(() -> this.tables));
     }
 
     private void refreshTableDescriptions()
     {
         try {
             // First populate tables to get the latest table names
-            Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
-
+            tables = populateTables();
+            log.info("Loaded %d tables", tables.size());
             // Update the table names in the config
             Set<String> newTableNames = tables.keySet().stream()
                     .map(name -> name.getSchemaName() + "." + name.getTableName())
                     .collect(toImmutableSet());
             config.updateTableNames(newTableNames);
-
             // Update the table description supplier
-            tableDescriptionSupplier.set(new MapBasedTableDescriptionSupplier(tables));
             log.debug("Refreshed Kafka table descriptions and updated table names");
         }
         catch (Exception e) {
@@ -111,8 +108,7 @@ public class FileTableDescriptionSupplier
 
     private TableDescriptionSupplier createTableDescriptionSupplier()
     {
-        Map<SchemaTableName, KafkaTopicDescription> tables = populateTables();
-        return new MapBasedTableDescriptionSupplier(tables);
+        return new SuplierMapBasedTableDescriptionSupplier(() -> this.tables);
     }
 
     @Override
@@ -140,35 +136,7 @@ public class FileTableDescriptionSupplier
             Map<SchemaTableName, KafkaTopicDescription> tableDefinitions = builder.buildOrThrow();
 
             log.debug("Loaded Table definitions: %s", tableDefinitions.keySet());
-
-            builder = ImmutableMap.builder();
-            for (String definedTable : tableNames) {
-                SchemaTableName tableName;
-                try {
-                    tableName = parseTableName(definedTable);
-                }
-                catch (IllegalArgumentException iae) {
-                    tableName = new SchemaTableName(defaultSchema, definedTable);
-                }
-
-                if (tableDefinitions.containsKey(tableName)) {
-                    KafkaTopicDescription kafkaTable = tableDefinitions.get(tableName);
-                    log.debug("Found Table definition for %s: %s", tableName, kafkaTable);
-                    builder.put(tableName, kafkaTable);
-                }
-                else {
-                    // A dummy table definition only supports the internal columns.
-                    log.debug("Created dummy Table definition for %s", tableName);
-                    builder.put(tableName, new KafkaTopicDescription(
-                            tableName.getTableName(),
-                            Optional.ofNullable(tableName.getSchemaName()),
-                            definedTable,
-                            Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of())),
-                            Optional.of(new KafkaTopicFieldGroup(DummyRowDecoder.NAME, Optional.empty(), Optional.empty(), ImmutableList.of()))));
-                }
-            }
-
-            return builder.buildOrThrow();
+            return tableDefinitions;
         }
         catch (IOException e) {
             log.warn(e, "Failed to get table description files for Kafka");

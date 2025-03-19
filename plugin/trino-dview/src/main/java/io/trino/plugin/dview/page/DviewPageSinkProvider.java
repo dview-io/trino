@@ -163,8 +163,7 @@ public class DviewPageSinkProvider
         String trinoVersion = session.getUser();
         ParquetWriterOptions parquetWriterOptions = ParquetWriterOptions.builder()
                 .build();
-        if (compressionCodec.getParquetCompressionCodec().isEmpty())
-        {
+        if (compressionCodec.getParquetCompressionCodec().isEmpty()) {
             throw new RuntimeException("Parquet compression codec is empty");
         }
         DviewPageSink pageSink;
