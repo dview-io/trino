@@ -29,6 +29,7 @@ import io.trino.spi.connector.SchemaTableName;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,6 +70,7 @@ public class FileTableDescriptionSupplier
         this.defaultSchema = kafkaConfig.getDefaultSchema();
         this.tableNames = config.getTableNames();
         long schemaRefreshInterval = config.getSchemaRefreshInterval();
+        this.tables = new HashMap<>();
         this.tableDescriptionSupplier = new AtomicReference<>(createTableDescriptionSupplier());
         // Custom ThreadFactory to set a specific thread name
         ThreadFactory namedThreadFactory = runnable -> {
@@ -91,7 +93,12 @@ public class FileTableDescriptionSupplier
     {
         try {
             // First populate tables to get the latest table names
-            tables = populateTables();
+//            tables = populateTables();
+            Map<SchemaTableName, KafkaTopicDescription> newTablesLoaded = populateTables();
+            log.info("newTablesLoaded keys: %s", newTablesLoaded.keySet());
+            // Merge new tables into the existing tables map (add/update, but don’t remove)
+            tables.putAll(newTablesLoaded);
+            log.info("Loaded %d tables (total in memory)", tables.size());
             log.info("Loaded %d tables", tables.size());
             // Update the table names in the config
             Set<String> newTableNames = tables.keySet().stream()

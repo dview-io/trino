@@ -1,7 +1,7 @@
 {
-    "tableName": "analytics_dbt_test6",
+    "tableName": "analytics_dbt_test7",
     "schemaName": "stream",
-    "topicName": "dview.analytics.dbt.test6",
+    "topicName": "dview.analytics.dbt.test7",
     "key": {
         "dataFormat": "raw",
         "fields": [
